@@ -88,7 +88,8 @@ class DebugModel(chainer.Chain):
             self.conv1 = chainer.links.Convolution2D(3, 64, ksize=3, stride=2)
             self.fc = chainer.links.Linear(None, num_classes)
 
-    def forward(self, x):
+    @chainer.static_graph
+    def __call__(self, x):
         h = self.conv1(x)
         ksize = h.shape[2]
         h = chainer.functions.average_pooling_2d(h, ksize)
@@ -109,16 +110,18 @@ def f2_score(y, true):
 
 
 class TrainChain(chainer.Chain):
-    def __init__(self, model):
+    def __init__(self, model, weight):
         super().__init__()
         with self.init_scope():
             self.model = model
+
+        self.weight = weight
 
     def forward(self, x, t):
         y = self.model(x)
         loss = chainer.functions.sigmoid_cross_entropy(y, t, reduce='no')
         xp = chainer.backends.cuda.get_array_module(t)
-        weights = xp.where(t == 0, 1, 4)
+        weights = xp.where(t == 0, 1, self.weight)
         loss = chainer.functions.mean(loss * weights)
         chainer.reporter.report({'loss': loss}, self)
         return loss
@@ -151,6 +154,7 @@ def main():
     parser.add_argument('--early-stopping', type=str,
                         help='Metric to watch for early stopping')
     parser.add_argument('--debug-model', action='store_true')
+    parser.add_argument('--weight-positive-sample', type=float, default=100)
     args = parser.parse_args()
 
     print(args)
@@ -158,7 +162,7 @@ def main():
 
     train, test = get_dataset()
     model = DebugModel() if args.debug_model else ResNet()
-    model = TrainChain(ResNet())
+    model = TrainChain(ResNet(), args.weight_positive_sample)
     if args.gpu >= 0:
         chainer.backends.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
