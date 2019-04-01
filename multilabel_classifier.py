@@ -193,7 +193,7 @@ def main():
         filename='snaphot_epoch_{.updater.epoch}'))
 
     # Write a log of evaluation statistics for each epoch
-    trainer.extend(extensions.LogReport(trigger=(1, 'iteration')))
+    trainer.extend(extensions.LogReport(trigger=(100, 'iteration')))
 
     # Print selected entries of the log to stdout
     # Here "main" refers to the target link of the "main" optimizer again, and
