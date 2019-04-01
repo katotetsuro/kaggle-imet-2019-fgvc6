@@ -102,9 +102,9 @@ def f2_score(y, true):
     tp = xp.sum(pred * true, axis=1)
     fp = xp.sum(pred * xp.logical_not(true), axis=1)
     fn = xp.sum(xp.logical_not(pred) * true, axis=1)
-    p = tp/(tp+fp)
-    r = tp/(tp+fn)
-    f2 = 5*p*r/(4*p+r+1e-5)
+    p = tp/(tp+fp+1e-8)
+    r = tp/(tp+fn+1e-8)
+    f2 = 5*p*r/(4*p+r+1e-8)
     return xp.mean(p), xp.mean(r), xp.mean(f2)
 
 
@@ -116,7 +116,10 @@ class TrainChain(chainer.Chain):
 
     def forward(self, x, t):
         y = self.model(x)
-        loss = chainer.functions.sigmoid_cross_entropy(y, t)
+        loss = chainer.functions.sigmoid_cross_entropy(y, t, reduce='no')
+        xp = chainer.backends.cuda.get_array_module(t)
+        weights = xp.where(t == 0, 1, 4)
+        loss = chainer.functions.mean(loss * weights)
         chainer.reporter.report({'loss': loss}, self)
         return loss
 
