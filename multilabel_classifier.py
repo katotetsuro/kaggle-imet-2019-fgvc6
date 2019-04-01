@@ -126,6 +126,7 @@ class TrainChain(chainer.Chain):
     def evaluate(self, x, t):
         y = self.model(x)
         loss = chainer.functions.sigmoid_cross_entropy(y, t)
+        y = chainer.functions.sigmoid(y)
         precision, recall, f2 = f2_score(y, t)
         chainer.reporter.report({'loss': loss,
                                  'precision': precision,
