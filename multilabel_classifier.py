@@ -70,7 +70,8 @@ class ResNet(chainer.Chain):
     def __init__(self):
         super().__init__()
         with self.init_scope():
-            self.res = chainer.links.model.vision.resnet.ResNet50Layers()
+            self.res = chainer.links.model.vision.resnet.ResNet50Layers(
+                pretrained_model=None)
             self.fc = chainer.links.Linear(None, num_classes)
 
     def forward(self, x):
@@ -133,7 +134,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--batchsize', '-b', type=int, default=64,
                         help='Number of images in each mini-batch')
-    parser.add_argument('--learnrate', '-l', type=float, default=0.05,
+    parser.add_argument('--learnrate', '-l', type=float, default=0.01,
                         help='Learning rate for SGD')
     parser.add_argument('--epoch', '-e', type=int, default=300,
                         help='Number of sweeps over the dataset to train')
@@ -158,7 +159,7 @@ def main():
         chainer.backends.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
 
-    optimizer = chainer.optimizers.MomentumSGD(args.learnrate)
+    optimizer = chainer.optimizers.Adam()
     optimizer.setup(model)
     optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
 
@@ -184,8 +185,8 @@ def main():
                                         eval_func=model.evaluate))
 
     # Reduce the learning rate by half every 25 epochs.
-    trainer.extend(extensions.ExponentialShift('lr', 0.5),
-                   trigger=(25, 'epoch'))
+#    trainer.extend(extensions.ExponentialShift('lr', 0.5),
+#                   trigger=(25, 'epoch'))
 
     # Take a snapshot at each epoch
     trainer.extend(extensions.snapshot(
