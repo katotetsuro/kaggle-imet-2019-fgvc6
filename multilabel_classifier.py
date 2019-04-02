@@ -215,8 +215,9 @@ def main():
     optimizer.setup(model)
     optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
 
-    train_iter = chainer.iterators.MultithreadIterator(train, args.batchsize)
-    test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize,
+    train_iter = chainer.iterators.MultithreadIterator(
+        train, args.batchsize, n_threads=8)
+    test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
                                                       repeat=False, shuffle=False)
 
     stop_trigger = (args.epoch, 'epoch')
