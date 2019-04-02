@@ -44,7 +44,14 @@ class MultilabelPandasDataset(chainer.dataset.dataset_mixin.DatasetMixin):
 class ImgaugTransformer(chainer.datasets.TransformDataset):
     def __init__(self):
         self.seq = iaa.Sequential([
-            iaa.Resize((224, 224))
+            iaa.Resize((224, 224)),
+            iaa.OneOf([
+                iaa.Affine(rotate=0),
+                iaa.Affine(rotate=90),
+                iaa.Affine(rotate=180),
+                iaa.Affine(rotate=270),
+                iaa.Fliplr(0.5),
+            ])
         ])
 
     def __call__(self, in_data):
