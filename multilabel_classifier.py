@@ -88,7 +88,6 @@ class DebugModel(chainer.Chain):
             self.conv1 = chainer.links.Convolution2D(3, 64, ksize=3, stride=2)
             self.fc = chainer.links.Linear(None, num_classes)
 
-    @chainer.static_graph
     def __call__(self, x):
         h = self.conv1(x)
         ksize = h.shape[2]
@@ -117,11 +116,12 @@ class TrainChain(chainer.Chain):
 
         self.weight = weight
 
+    @chainer.static_graph
     def forward(self, x, t):
         y = self.model(x)
         loss = chainer.functions.sigmoid_cross_entropy(y, t, reduce='no')
         xp = chainer.backends.cuda.get_array_module(t)
-        weights = xp.where(t == 0, 1, self.weight)
+        weights = xp.where(t.array == 0, 1, self.weight)
         loss = chainer.functions.mean(loss * weights)
         chainer.reporter.report({'loss': loss}, self)
         return loss
