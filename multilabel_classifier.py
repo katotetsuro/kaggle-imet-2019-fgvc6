@@ -2,6 +2,7 @@ import argparse
 
 import chainer
 import chainer.links as L
+import chainer.functions as F
 from chainer import training
 from chainer.training import extensions
 from chainer.training import triggers
@@ -93,7 +94,7 @@ class DebugModel(chainer.Chain):
     def forward(self, x):
         h = self.conv1(x)
         ksize = h.shape[2]
-        h = chainer.functions.average_pooling_2d(h, ksize)
+        h = F.average_pooling_2d(h, ksize)
         h = self.fc(h)
         return h
 
@@ -110,27 +111,52 @@ def f2_score(y, true):
     return xp.mean(p), xp.mean(r), xp.mean(f2)
 
 
+def focal_loss(logit, y_true):
+    """from https://www.kaggle.com/mathormad/pretrained-resnet50-focal-loss
+    """
+    gamma = 2.0
+    epsilon = 1e-5
+    y_pred = F.sigmoid(logit)
+    pt = y_pred * y_true + (1-y_pred) * (1-y_true)
+    pt = F.clip(pt, epsilon, 1-epsilon)
+    CE = -F.log(pt)
+    FL = (1-pt)**gamma * CE
+    loss = F.mean(F.sum(FL, axis=1))
+    return loss
+
+
 class TrainChain(chainer.Chain):
-    def __init__(self, model, weight):
+    def __init__(self, model, weight, loss_fn):
         super().__init__()
         with self.init_scope():
             self.model = model
 
         self.weight = weight
+        if loss_fn == 'focal':
+            self.loss_fn = focal_loss
+        elif loss_fn == 'sigmoid':
+            self.loss_fn = lambda x, t: F.sigmoid_cross_entropy(
+                x, t, reduce='no')
+        else:
+            raise ValueError('unknown loss function. {}'.format(loss_fn))
+
+    def loss(self, y, t):
+        loss = self.loss_fn(y, t)
+        xp = chainer.backends.cuda.get_array_module(t)
+        weights = xp.where(t == 0, 1, self.weight)
+        loss = F.mean(loss * weights)
+        return loss
 
     def forward(self, x, t):
         y = self.model(x)
-        loss = chainer.functions.sigmoid_cross_entropy(y, t, reduce='no')
-        xp = chainer.backends.cuda.get_array_module(t)
-        weights = xp.where(t == 0, 1, self.weight)
-        loss = chainer.functions.mean(loss * weights)
+        loss = self.loss(y, t)
         chainer.reporter.report({'loss': loss}, self)
         return loss
 
     def evaluate(self, x, t):
         y = self.model(x)
-        loss = chainer.functions.sigmoid_cross_entropy(y, t)
-        y = chainer.functions.sigmoid(y)
+        loss = self.loss_fn(y, t)
+        y = F.sigmoid(y)
         precision, recall, f2 = f2_score(y, t)
         chainer.reporter.report({'loss': loss,
                                  'precision': precision,
@@ -155,7 +181,11 @@ def main():
     parser.add_argument('--early-stopping', type=str,
                         help='Metric to watch for early stopping')
     parser.add_argument('--debug-model', action='store_true')
-    parser.add_argument('--weight-positive-sample', type=float, default=100)
+    parser.add_argument('--weight-positive-sample',
+                        '-w', type=float, default=1)
+    parser.add_argument('--loss-function',
+                        choices=['focal', 'sigmoid'], default='focal')
+    parser.add_argument('--optimizer', choices=['sgd', 'adam'], default='adam')
     args = parser.parse_args()
 
     print(args)
@@ -163,12 +193,17 @@ def main():
 
     train, test = get_dataset()
     model = DebugModel() if args.debug_model else ResNet()
-    model = TrainChain(ResNet(), args.weight_positive_sample)
+    model = TrainChain(ResNet(), args.weight_positive_sample,
+                       loss_fn=args.loss_function)
     if args.gpu >= 0:
         chainer.backends.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
 
-    optimizer = chainer.optimizers.Adam()
+    if args.optimizer == 'adam':
+        optimizer = chainer.optimizers.Adam()
+    elif args.optimizer == 'sgd':
+        optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
+
     optimizer.setup(model)
     optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
 
@@ -193,9 +228,9 @@ def main():
     trainer.extend(extensions.Evaluator(test_iter, model, device=args.gpu,
                                         eval_func=model.evaluate))
 
-    # Reduce the learning rate by half every 25 epochs.
-#    trainer.extend(extensions.ExponentialShift('lr', 0.5),
-#                   trigger=(25, 'epoch'))
+    if args.optimizer == 'sgd':
+        trainer.extend(extensions.ExponentialShift(
+            'lr', 0.5), trigger=(2, 'epoch'))
 
     # Take a snapshot at each epoch
     trainer.extend(extensions.snapshot(
