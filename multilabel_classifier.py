@@ -42,9 +42,9 @@ class MultilabelPandasDataset(chainer.dataset.dataset_mixin.DatasetMixin):
 
 
 class ImgaugTransformer(chainer.datasets.TransformDataset):
-    def __init__(self):
+    def __init__(self, size):
         self.seq = iaa.Sequential([
-            iaa.Resize((224, 224)),
+            iaa.Resize((size, size)),
             iaa.OneOf([
                 iaa.Affine(rotate=0),
                 iaa.Affine(rotate=90),
@@ -63,14 +63,14 @@ class ImgaugTransformer(chainer.datasets.TransformDataset):
         return x, t
 
 
-def get_dataset():
+def get_dataset(size):
     kf = KFold(n_splits=10, shuffle=True, random_state=0)
     df = pd.read_csv('data/train.csv')
     train, test = next(iter(kf.split(df.index)))
     train = MultilabelPandasDataset(df.iloc[train], 'data/train')
-    train = chainer.datasets.TransformDataset(train, ImgaugTransformer())
+    train = chainer.datasets.TransformDataset(train, ImgaugTransformer(size))
     test = MultilabelPandasDataset(df.iloc[test], 'data/train')
-    test = chainer.datasets.TransformDataset(test, ImgaugTransformer())
+    test = chainer.datasets.TransformDataset(test, ImgaugTransformer(size))
     return train, test
 
 
@@ -193,12 +193,13 @@ def main():
     parser.add_argument('--loss-function',
                         choices=['focal', 'sigmoid'], default='focal')
     parser.add_argument('--optimizer', choices=['sgd', 'adam'], default='adam')
+    parser.add_argument('--size', type=int, default=224)
     args = parser.parse_args()
 
     print(args)
     # TODO save args
 
-    train, test = get_dataset()
+    train, test = get_dataset(args.size)
     model = DebugModel() if args.debug_model else ResNet()
     model = TrainChain(ResNet(), args.weight_positive_sample,
                        loss_fn=args.loss_function)
