@@ -259,6 +259,7 @@ def main():
     parser.add_argument('--size', type=int, default=224)
     parser.add_argument('--limit', type=int, default=None)
     parser.add_argument('--data-dir', type=str, default='data')
+    parser.add_argument('--hour', type=int, default=6)
     args = parser.parse_args()
 
     print(args)
@@ -294,7 +295,7 @@ def main():
             if epoch > args.epoch:
                 return True
             time = trainer.elapsed_time
-            if time > 1 * 60 * 60:
+            if time > args.hour * 60 * 60:
                 print('時間切れで終了します。経過時間:{}'.format(time))
                 return True
             return False
