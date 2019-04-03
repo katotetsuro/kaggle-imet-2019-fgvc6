@@ -87,17 +87,17 @@ class ImgaugTransformer(chainer.datasets.TransformDataset):
             return x,
 
 
-def get_dataset(size, limit):
+def get_dataset(data_dir, size, limit):
     kf = KFold(n_splits=10, shuffle=True, random_state=0)
-    df = pd.read_csv('data/train.csv')
+    df = pd.read_csv(join(data_dir, 'train.csv'))
     train, test = next(iter(kf.split(df.index)))
     if limit is not None:
         train = train[:limit]
         test = test[:limit]
-    train = MultilabelPandasDataset(df.iloc[train], 'data/train')
+    train = MultilabelPandasDataset(df.iloc[train], join(data_dir, 'train'))
     train = chainer.datasets.TransformDataset(
         train, ImgaugTransformer(size, True))
-    test = MultilabelPandasDataset(df.iloc[test], 'data/train')
+    test = MultilabelPandasDataset(df.iloc[test], join(data_dir, 'train'))
     test = chainer.datasets.TransformDataset(
         test, ImgaugTransformer(size, False))
     return train, test
@@ -234,7 +234,7 @@ def infer(data_iter, model, gpu):
         return pred
 
 
-def main():
+def main(args=None):
     chainer.global_config.autotune = True
     chainer.cuda.set_max_workspace_size(512*1024*1024)
     parser = argparse.ArgumentParser()
@@ -242,7 +242,7 @@ def main():
                         help='Number of images in each mini-batch')
     parser.add_argument('--learnrate', '-l', type=float, default=0.01,
                         help='Learning rate for SGD')
-    parser.add_argument('--epoch', '-e', type=int, default=300,
+    parser.add_argument('--epoch', '-e', type=int, default=80,
                         help='Number of sweeps over the dataset to train')
     parser.add_argument('--gpu', '-g', type=int, default=0,
                         help='GPU ID (negative value indicates CPU)')
@@ -260,12 +260,12 @@ def main():
     parser.add_argument('--limit', type=int, default=None)
     parser.add_argument('--data-dir', type=str, default='data')
     parser.add_argument('--hour', type=int, default=6)
-    args = parser.parse_args()
+    args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
     # TODO save args
 
-    train, test = get_dataset(args.size, args.limit)
+    train, test = get_dataset(args.data_dir, args.size, args.limit)
     base_model = DebugModel() if args.debug_model else ResNet()
     model = TrainChain(base_model, args.weight_positive_sample,
                        loss_fn=args.loss_function)
@@ -375,3 +375,11 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+# kaggleで動かす用のコード
+# args = [
+#     '--data-dir', '../input',
+#     '--size', '128',
+#     '--hour', '6'
+# ]
+# main(args)
