@@ -250,9 +250,16 @@ def main():
         trainer.extend(extensions.ExponentialShift(
             'lr', 0.5), trigger=(2, 'epoch'))
 
-    # Take a snapshot at each epoch
+    # Take a snapshot of Trainer at each epoch
     trainer.extend(extensions.snapshot(
         filename='snaphot_epoch_{.updater.epoch}'))
+
+    # Take a snapshot of Model which has best F2 score.
+    trainer.extend(extensions.snapshot_object(
+        model.model, 'bestmodel'), trigger=triggers.MaxValueTrigger('validation/main/f2'))
+    # MaxValueTriggerがちゃんと使えてるか確認できるまで、毎エポック保存する
+    trainer.extend(extensions.snapshot_object(
+        model.model, 'model_{.updater.epoch}'), trigger=(1, 'epoch'))
 
     # Write a log of evaluation statistics for each epoch
     trainer.extend(extensions.LogReport(trigger=(100, 'iteration')))
