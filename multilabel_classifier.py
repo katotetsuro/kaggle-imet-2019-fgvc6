@@ -82,7 +82,6 @@ class ResNet(chainer.Chain):
                 pretrained_model=None)
             self.fc = chainer.links.Linear(None, num_classes)
 
-    @chainer.static_graph
     def forward(self, x):
         h = self.res.forward(x, layers=['pool5'])['pool5']
         h = self.fc(h)
@@ -97,7 +96,6 @@ class DebugModel(chainer.Chain):
             self.conv1 = chainer.links.Convolution2D(3, 64, ksize=3, stride=2)
             self.fc = chainer.links.Linear(None, num_classes)
 
-    @chainer.static_graph
     def forward(self, x):
         h = self.conv1(x)
         ksize = h.shape[2]
@@ -172,6 +170,8 @@ class TrainChain(chainer.Chain):
 
 
 def main():
+    chainer.global_config.autotune = True
+    chainer.cuda.set_max_workspace_size(512*1024*1024)
     parser = argparse.ArgumentParser()
     parser.add_argument('--batchsize', '-b', type=int, default=64,
                         help='Number of images in each mini-batch')
