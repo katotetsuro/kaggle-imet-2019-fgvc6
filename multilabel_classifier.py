@@ -9,6 +9,7 @@ from chainer.training import triggers
 
 from PIL import Image
 from os.path import join
+from pathlib import Path
 from glob import glob
 
 import numpy as np
@@ -43,9 +44,9 @@ class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
 
 
 class ImageDataset(chainer.dataset.DatasetMixin):
-    def __init__(self, data_dir):
+    def __init__(self, image_files):
         super().__init__()
-        self.image_files = glob(join(data_dir, 'test/*.png'))
+        self.image_files = image_files
 
     def __len__(self):
         return len(self.image_files)
@@ -54,7 +55,7 @@ class ImageDataset(chainer.dataset.DatasetMixin):
         image = Image.open(self.image_files[i])
         image = image.convert('RGB')
         image = np.asarray(image).astype(np.uint8)
-        return image
+        return image,
 
 
 class ImgaugTransformer(chainer.datasets.TransformDataset):
@@ -79,11 +80,11 @@ class ImgaugTransformer(chainer.datasets.TransformDataset):
             x = x.transpose(2, 0, 1).astype(np.float32) / 255.0
             return x, t
         elif len(in_data) == 1:
-            x = in_data
+            x, = in_data
             x = self.seq.augment_image(x)
             # to chainer style
             x = x.transpose(2, 0, 1).astype(np.float32) / 255.0
-            return x
+            return x,
 
 
 def get_dataset(size, limit):
@@ -221,13 +222,13 @@ def infer(data_iter, model, gpu):
                 x, t = batch
                 true.append(chainer.backends.cuda.to_cpu(t))
             else:
-                x = batch
+                x, = batch
             y = model(x)
             y = F.sigmoid(y)
             pred.append(chainer.backends.cuda.to_cpu(y.array))
     pred = np.concatenate(pred)
-    true = np.concatenate(true)
     if len(true):
+        true = np.concatenate(true)
         return pred, true
     else:
         return pred
@@ -349,19 +350,26 @@ def main():
     chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
 
     pred, true = infer(test_iter, base_model, args.gpu)
-    # find an optimal threshold value which maximize F2 score
-    f2_scores = [f2_score(pred, true, i)[2] for i in np.arange(0, 1, 0.01)]
-    best_threshold_index = np.argmax(f2_scores)
-    best_threshold = best_threshold_index * 0.01
-    print('しきい値:{} で F2スコア{}'.format(
-        best_threshold, f2_scores[best_threshold_index]))
+    best_threshold, scores = find_optimal_threshold(pred, true)
+    print('しきい値:{} で F2スコア{}'.format(best_threshold, scores))
 
-    test = ImageDataset(args.data_dir)
+    image_files = glob(join(args.data_dir, 'test/*.png'))
+    test = ImageDataset(image_files)
     test = chainer.datasets.TransformDataset(
         test, ImgaugTransformer(args.size, False))
     test_iter = chainer.iterators.MultithreadIterator(
         test, args.batchsize, repeat=False, shuffle=False, n_threads=8)
     pred = infer(test_iter, base_model, args.gpu)
+    pred = pred > best_threshold
+    attributes = []
+    for p in pred:
+        attr = np.nonzero(p)[0]
+        attr = map(str, attr)
+        attributes.append(' '.join(attr))
+    submit_df = pd.DataFrame()
+    submit_df['id'] = [Path(p).stem for p in image_files]
+    submit_df['attribute_ids'] = attributes
+    submit_df.to_csv('submission.csv', index=False)
 
 
 if __name__ == '__main__':
