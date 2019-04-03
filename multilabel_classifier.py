@@ -42,17 +42,18 @@ class MultilabelPandasDataset(chainer.dataset.dataset_mixin.DatasetMixin):
 
 
 class ImgaugTransformer(chainer.datasets.TransformDataset):
-    def __init__(self, size):
+    def __init__(self, size, train):
         self.seq = iaa.Sequential([
-            iaa.Resize((size, size)),
-            iaa.OneOf([
+            iaa.Resize((size, size))
+        ])
+        if train:
+            self.seq.append(iaa.OneOf([
                 iaa.Affine(rotate=0),
                 iaa.Affine(rotate=90),
                 iaa.Affine(rotate=180),
                 iaa.Affine(rotate=270),
                 iaa.Fliplr(0.5),
-            ])
-        ])
+            ]))
 
     def __call__(self, in_data):
         x, t = in_data
@@ -63,14 +64,19 @@ class ImgaugTransformer(chainer.datasets.TransformDataset):
         return x, t
 
 
-def get_dataset(size):
+def get_dataset(size, limit):
     kf = KFold(n_splits=10, shuffle=True, random_state=0)
     df = pd.read_csv('data/train.csv')
     train, test = next(iter(kf.split(df.index)))
+    if limit is not None:
+        train = train[:limit]
+        test = test[:limit]
     train = MultilabelPandasDataset(df.iloc[train], 'data/train')
-    train = chainer.datasets.TransformDataset(train, ImgaugTransformer(size))
+    train = chainer.datasets.TransformDataset(
+        train, ImgaugTransformer(size, True))
     test = MultilabelPandasDataset(df.iloc[test], 'data/train')
-    test = chainer.datasets.TransformDataset(test, ImgaugTransformer(size))
+    test = chainer.datasets.TransformDataset(
+        test, ImgaugTransformer(size, False))
     return train, test
 
 
@@ -104,9 +110,11 @@ class DebugModel(chainer.Chain):
         return h
 
 
-def f2_score(y, true):
+def f2_score(y, true, threshold=0.5):
     xp = chainer.backends.cuda.get_array_module(y)
-    pred = y.array > 0.5
+    if isinstance(y, chainer.Variable):
+        y = y.array
+    pred = y > threshold
     tp = xp.sum(pred * true, axis=1)
     fp = xp.sum(pred * xp.logical_not(true), axis=1)
     fn = xp.sum(xp.logical_not(pred) * true, axis=1)
@@ -192,14 +200,15 @@ def main():
                         choices=['focal', 'sigmoid'], default='focal')
     parser.add_argument('--optimizer', choices=['sgd', 'adam'], default='adam')
     parser.add_argument('--size', type=int, default=224)
+    parser.add_argument('--limit', type=int, default=None)
     args = parser.parse_args()
 
     print(args)
     # TODO save args
 
-    train, test = get_dataset(args.size)
-    model = DebugModel() if args.debug_model else ResNet()
-    model = TrainChain(ResNet(), args.weight_positive_sample,
+    train, test = get_dataset(args.size, args.limit)
+    base_model = DebugModel() if args.debug_model else ResNet()
+    model = TrainChain(base_model, args.weight_positive_sample,
                        loss_fn=args.loss_function)
     if args.gpu >= 0:
         chainer.backends.cuda.get_device_from_id(args.gpu).use()
@@ -238,7 +247,7 @@ def main():
     # Set up a trainer
     updater = training.updaters.StandardUpdater(
         train_iter, optimizer, device=args.gpu,
-        converter=lambda batch, device: chainer.dataset.concat_examples(batch, device=device, padding=-1))
+        converter=lambda batch, device: chainer.dataset.concat_examples(batch, device=device))
     trainer = training.Trainer(
         updater, TimeupTrigger(args.epoch), out=args.out)
 
@@ -280,6 +289,25 @@ def main():
     trainer.run()
 
     # predict
+    chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
+    with chainer.using_config('train', False), chainer.using_config('enable_backprop', False):
+        test_iter.reset()
+        pred = []
+        true = []
+        for batch in test_iter:
+            x, t = chainer.dataset.concat_examples(batch, device=args.gpu)
+            y = base_model(x)
+            y = F.sigmoid(y)
+            pred.append(chainer.backends.cuda.to_cpu(y.array))
+            true.append(chainer.backends.cuda.to_cpu(t))
+    pred = np.concatenate(pred)
+    true = np.concatenate(true)
+    # find an optimal threshold value which maximize F2 score
+    f2_scores = [f2_score(pred, true, i)[2] for i in np.arange(0, 1, 0.01)]
+    best_threshold_index = np.argmax(f2_score)
+    best_threshold = best_threshold_index * 0.01
+    print('しきい値:{} で F2スコア{}'.format(
+        best_threshold, f2_scores[best_threshold_index]))
 
 
 if __name__ == '__main__':
