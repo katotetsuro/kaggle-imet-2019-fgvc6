@@ -88,6 +88,7 @@ class ResNet(chainer.Chain):
                 pretrained_model=None)
             self.fc = chainer.links.Linear(None, num_classes)
 
+    @chainer.static_graph
     def forward(self, x):
         h = self.res.forward(x, layers=['pool5'])['pool5']
         h = self.fc(h)
@@ -102,6 +103,7 @@ class DebugModel(chainer.Chain):
             self.conv1 = chainer.links.Convolution2D(3, 64, ksize=3, stride=2)
             self.fc = chainer.links.Linear(None, num_classes)
 
+    @chainer.static_graph
     def forward(self, x):
         h = self.conv1(x)
         ksize = h.shape[2]
