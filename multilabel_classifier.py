@@ -153,8 +153,6 @@ def find_optimal_threshold(pred, true):
                           for i in np.arange(0, 1, 0.01)])
     best_threshold_index = np.argmax(f2_scores[:, 2])
     best_threshold = best_threshold_index * 0.01
-    print('しきい値:{} で F2スコア{}'.format(
-        best_threshold, f2_scores[best_threshold_index]))
     return best_threshold, f2_scores[best_threshold_index]
 
 
