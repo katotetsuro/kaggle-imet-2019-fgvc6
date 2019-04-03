@@ -185,8 +185,6 @@ def main():
                         help='Directory to output the result')
     parser.add_argument('--resume', '-r', default='',
                         help='Resume the training from snapshot')
-    parser.add_argument('--early-stopping', type=str,
-                        help='Metric to watch for early stopping')
     parser.add_argument('--debug-model', action='store_true')
     parser.add_argument('--weight-positive-sample',
                         '-w', type=float, default=1)
@@ -220,18 +218,29 @@ def main():
     test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
                                                       repeat=False, shuffle=False)
 
-    stop_trigger = (args.epoch, 'epoch')
-    # Early stopping option
-    if args.early_stopping:
-        stop_trigger = triggers.EarlyStoppingTrigger(
-            monitor=args.early_stopping, verbose=True,
-            max_trigger=(args.epoch, 'epoch'))
+    class TimeupTrigger():
+        def __init__(self, epoch):
+            self.epoch = epoch
+
+        def __call__(self, trainer):
+            epoch = trainer.updater.epoch
+            if epoch > args.epoch:
+                return True
+            time = trainer.elapsed_time
+            if time > 1 * 60 * 60:
+                print('時間切れで終了します。経過時間:{}'.format(time))
+                return True
+            return False
+
+        def get_training_length(self):
+            return self.epoch, 'epoch'
 
     # Set up a trainer
     updater = training.updaters.StandardUpdater(
         train_iter, optimizer, device=args.gpu,
         converter=lambda batch, device: chainer.dataset.concat_examples(batch, device=device, padding=-1))
-    trainer = training.Trainer(updater, stop_trigger, out=args.out)
+    trainer = training.Trainer(
+        updater, TimeupTrigger(args.epoch), out=args.out)
 
     # Evaluate the model with the test dataset for each epoch
     trainer.extend(extensions.Evaluator(test_iter, model, device=args.gpu,
@@ -267,6 +276,8 @@ def main():
 
     # Run the training
     trainer.run()
+
+    # predict
 
 
 if __name__ == '__main__':
