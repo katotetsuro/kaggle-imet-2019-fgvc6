@@ -9,6 +9,7 @@ from chainer.training import triggers
 
 from PIL import Image
 from os.path import join
+from glob import glob
 
 import numpy as np
 import pandas as pd
@@ -19,7 +20,7 @@ from sklearn.model_selection import KFold
 num_classes = 1103
 
 
-class MultilabelPandasDataset(chainer.dataset.dataset_mixin.DatasetMixin):
+class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
     def __init__(self, df, data_dir):
         super().__init__()
         self.df = df
@@ -41,6 +42,21 @@ class MultilabelPandasDataset(chainer.dataset.dataset_mixin.DatasetMixin):
         return image, one_hot_attributes
 
 
+class ImageDataset(chainer.dataset.DatasetMixin):
+    def __init__(self, data_dir):
+        super().__init__()
+        self.image_files = glob(join(data_dir, 'test/*.png'))
+
+    def __len__(self):
+        return len(self.image_files)
+
+    def get_example(self, i):
+        image = Image.open(self.image_files[i])
+        image = image.convert('RGB')
+        image = np.asarray(image).astype(np.uint8)
+        return image
+
+
 class ImgaugTransformer(chainer.datasets.TransformDataset):
     def __init__(self, size, train):
         self.seq = iaa.Sequential([
@@ -56,12 +72,18 @@ class ImgaugTransformer(chainer.datasets.TransformDataset):
             ]))
 
     def __call__(self, in_data):
-        x, t = in_data
-        x = self.seq.augment_image(x)
-
-        # to chainer style
-        x = x.transpose(2, 0, 1).astype(np.float32) / 255.0
-        return x, t
+        if len(in_data) == 2:
+            x, t = in_data
+            x = self.seq.augment_image(x)
+            # to chainer style
+            x = x.transpose(2, 0, 1).astype(np.float32) / 255.0
+            return x, t
+        elif len(in_data) == 1:
+            x = in_data
+            x = self.seq.augment_image(x)
+            # to chainer style
+            x = x.transpose(2, 0, 1).astype(np.float32) / 255.0
+            return x
 
 
 def get_dataset(size, limit):
@@ -112,7 +134,7 @@ class DebugModel(chainer.Chain):
         return h
 
 
-def f2_score(y, true, threshold=0.5):
+def f2_score(y, true, threshold):
     xp = chainer.backends.cuda.get_array_module(y)
     if isinstance(y, chainer.Variable):
         y = y.array
@@ -124,6 +146,16 @@ def f2_score(y, true, threshold=0.5):
     r = tp/(tp+fn+1e-8)
     f2 = 5*p*r/(4*p+r+1e-8)
     return xp.mean(p), xp.mean(r), xp.mean(f2)
+
+
+def find_optimal_threshold(pred, true):
+    f2_scores = np.array([f2_score(pred, true, i)
+                          for i in np.arange(0, 1, 0.01)])
+    best_threshold_index = np.argmax(f2_scores[:, 2])
+    best_threshold = best_threshold_index * 0.01
+    print('しきい値:{} で F2スコア{}'.format(
+        best_threshold, f2_scores[best_threshold_index]))
+    return best_threshold, f2_scores[best_threshold_index]
 
 
 def focal_loss(logit, y_true):
@@ -172,11 +204,35 @@ class TrainChain(chainer.Chain):
         y = self.model(x)
         loss = self.loss_fn(y, t)
         y = F.sigmoid(y)
-        precision, recall, f2 = f2_score(y, t)
+        threshold, (precision, recall, f2) = find_optimal_threshold(y, t)
         chainer.reporter.report({'loss': loss,
                                  'precision': precision,
                                  'recall': recall,
-                                 'f2': f2}, self)
+                                 'f2': f2,
+                                 'threshold': threshold}, self)
+
+
+def infer(data_iter, model, gpu):
+    with chainer.using_config('train', False), chainer.using_config('enable_backprop', False):
+        data_iter.reset()
+        pred = []
+        true = []
+        for batch in data_iter:
+            batch = chainer.dataset.concat_examples(batch, device=gpu)
+            if len(batch) == 2:
+                x, t = batch
+                true.append(chainer.backends.cuda.to_cpu(t))
+            else:
+                x = batch
+            y = model(x)
+            y = F.sigmoid(y)
+            pred.append(chainer.backends.cuda.to_cpu(y.array))
+    pred = np.concatenate(pred)
+    true = np.concatenate(true)
+    if len(true):
+        return pred, true
+    else:
+        return pred
 
 
 def main():
@@ -203,6 +259,7 @@ def main():
     parser.add_argument('--optimizer', choices=['sgd', 'adam'], default='adam')
     parser.add_argument('--size', type=int, default=224)
     parser.add_argument('--limit', type=int, default=None)
+    parser.add_argument('--data-dir', type=str, default='data')
     args = parser.parse_args()
 
     print(args)
@@ -278,7 +335,7 @@ def main():
     trainer.extend(extensions.PrintReport(
         ['epoch', 'main/loss', 'validation/main/loss',
          'main/accuracy', 'validation/main/precision', 'validation/main/recall',
-         'validation/main/f2', 'elapsed_time']))
+         'validation/main/f2', 'validation/main/threshold', 'elapsed_time']))
 
     # Print a progress bar to stdout
     trainer.extend(extensions.ProgressBar())
@@ -292,24 +349,21 @@ def main():
 
     # predict
     chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
-    with chainer.using_config('train', False), chainer.using_config('enable_backprop', False):
-        test_iter.reset()
-        pred = []
-        true = []
-        for batch in test_iter:
-            x, t = chainer.dataset.concat_examples(batch, device=args.gpu)
-            y = base_model(x)
-            y = F.sigmoid(y)
-            pred.append(chainer.backends.cuda.to_cpu(y.array))
-            true.append(chainer.backends.cuda.to_cpu(t))
-    pred = np.concatenate(pred)
-    true = np.concatenate(true)
+
+    pred, true = infer(test_iter, base_model, args.gpu)
     # find an optimal threshold value which maximize F2 score
     f2_scores = [f2_score(pred, true, i)[2] for i in np.arange(0, 1, 0.01)]
-    best_threshold_index = np.argmax(f2_score)
+    best_threshold_index = np.argmax(f2_scores)
     best_threshold = best_threshold_index * 0.01
     print('しきい値:{} で F2スコア{}'.format(
         best_threshold, f2_scores[best_threshold_index]))
+
+    test = ImageDataset(args.data_dir)
+    test = chainer.datasets.TransformDataset(
+        test, ImgaugTransformer(args.size, False))
+    test_iter = chainer.iterators.MultithreadIterator(
+        test, args.batchsize, repeat=False, shuffle=False, n_threads=8)
+    pred = infer(test_iter, base_model, args.gpu)
 
 
 if __name__ == '__main__':
