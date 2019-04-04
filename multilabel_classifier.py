@@ -283,6 +283,8 @@ def main(args=None):
     # find optimal threshold
     base_model = DebugModel() if args.debug_model else ResNet()
     chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
+    if args.gpu >= 0:
+        model.to_gpu()
 
     pred, true = infer(test_iter, base_model, args.gpu)
     thresholds, mean_threshold, scores = find_optimal_threshold(
