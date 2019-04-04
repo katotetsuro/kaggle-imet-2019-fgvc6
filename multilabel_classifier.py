@@ -18,6 +18,7 @@ import pandas as pd
 from imgaug import augmenters as iaa
 from sklearn.model_selection import KFold
 
+from lr_finder import LRFinder
 
 num_attributes = 1103
 
@@ -334,6 +335,11 @@ def main(args=None):
     if args.optimizer == 'sgd':
         trainer.extend(extensions.ExponentialShift(
             'lr', 0.5), trigger=(2, 'epoch'))
+        trainer.extend(LRFinder(1e-7, 1, 5, optimizer),
+                       trigger=(1, 'iteration'))
+    elif args.optimizer == 'adam':
+        trainer.extend(LRFinder(1e-7, 1, 5, optimizer,
+                                lr_key='alpha'), trigger=(1, 'iteration'))
 
     # Take a snapshot of Trainer at each epoch
     trainer.extend(extensions.snapshot(
@@ -354,7 +360,6 @@ def main(args=None):
          'main/accuracy', 'validation/main/precision', 'validation/main/recall',
          'validation/main/f2', 'validation/main/threshold', 'elapsed_time']))
 
-    # Print a progress bar to stdout
     trainer.extend(extensions.ProgressBar())
 
     if args.resume:
