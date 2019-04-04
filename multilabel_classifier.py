@@ -277,7 +277,7 @@ def main(args=None):
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
-    pickle.dump(args, open(Path(args.out).joinpath('args'), 'wb'))
+    pickle.dump(args, open(str(Path(args.out).joinpath('args')), 'wb'))
 
     train, test = get_dataset(args.data_dir, args.size, args.limit)
     base_model = DebugModel() if args.debug_model else ResNet()
