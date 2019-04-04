@@ -19,7 +19,7 @@ from imgaug import augmenters as iaa
 from sklearn.model_selection import KFold
 
 
-num_classes = 1103
+num_attributes = 1103
 
 
 class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
@@ -35,7 +35,7 @@ class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
         image_id, attributes = self.df.iloc[i]
         attributes = list(map(int, attributes.split(' ')))
         # TODO one_hot vectorの保持はメモリの無駄か
-        one_hot_attributes = np.zeros(num_classes, dtype=np.int32)
+        one_hot_attributes = np.zeros(num_attributes, dtype=np.int32)
         for a in attributes:
             one_hot_attributes[a] = 1
         image = Image.open(join(self.data_dir, image_id + '.png'))
@@ -110,7 +110,7 @@ class ResNet(chainer.Chain):
         with self.init_scope():
             self.res = chainer.links.model.vision.resnet.ResNet50Layers(
                 pretrained_model=None)
-            self.fc = chainer.links.Linear(None, num_classes)
+            self.fc = chainer.links.Linear(None, num_attributes)
 
     @chainer.static_graph
     def forward(self, x):
@@ -125,7 +125,7 @@ class DebugModel(chainer.Chain):
         super().__init__()
         with self.init_scope():
             self.conv1 = chainer.links.Convolution2D(3, 64, ksize=3, stride=2)
-            self.fc = chainer.links.Linear(None, num_classes)
+            self.fc = chainer.links.Linear(None, num_attributes)
 
     @chainer.static_graph
     def forward(self, x):
@@ -150,11 +150,24 @@ def f2_score(pred, true):
 def find_optimal_threshold(y, true):
     if isinstance(y, chainer.Variable):
         y = y.array
-    f2_scores = np.array([f2_score(y > i, true)
-                          for i in np.arange(0, 1, 0.01)])
-    best_threshold_index = np.argmax(f2_scores[:, 2])
-    best_threshold = best_threshold_index * 0.01
-    return best_threshold, f2_scores[best_threshold_index]
+    # num_attributesの数だけ独立にしきい値を探していく
+    xp = chainer.backends.cuda.get_array_module(y)
+    thresholds = xp.zeros(num_attributes, dtype=np.float32)
+    step = 0.01
+    for j in range(len(thresholds)):
+        f2_scores = []
+        for i in xp.arange(0, 1, step):
+            thresholds[j] = i
+            s = f2_score(y > thresholds, true)
+            f2_scores.append(s)
+
+        f2_scores = np.asarray(f2_scores)
+        best_threshold_index = xp.argmax(f2_scores[:, 2])
+        best_threshold = best_threshold_index * step
+        thresholds[j] = best_threshold
+
+    mean_threshold = xp.mean(thresholds)
+    return thresholds, mean_threshold, f2_scores[best_threshold_index]
 
 
 def focal_loss(logit, y_true):
@@ -203,12 +216,13 @@ class TrainChain(chainer.Chain):
         y = self.model(x)
         loss = self.loss_fn(y, t)
         y = F.sigmoid(y)
-        threshold, (precision, recall, f2) = find_optimal_threshold(y, t)
+        thresholds, mean_threshold, (precision,
+                                     recall, f2) = find_optimal_threshold(y, t)
         chainer.reporter.report({'loss': loss,
                                  'precision': precision,
                                  'recall': recall,
                                  'f2': f2,
-                                 'threshold': threshold}, self)
+                                 'threshold': mean_threshold}, self)
 
 
 def infer(data_iter, model, gpu):
@@ -352,8 +366,10 @@ def main(args=None):
     chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
 
     pred, true = infer(test_iter, base_model, args.gpu)
-    best_threshold, scores = find_optimal_threshold(pred, true)
-    print('しきい値:{} で F2スコア{}'.format(best_threshold, scores))
+    thresholds, mean_threshold, scores = find_optimal_threshold(pred, true)
+    print('しきい値:{} で F2スコア{}'.format(mean_threshold, scores))
+    thresholds = chainer.backends.cuda.to_cpu(thresholds)
+    np.save(open(Path(args.out).joinpath('thresholds.npy')), thresholds)
 
 
 if __name__ == '__main__':
