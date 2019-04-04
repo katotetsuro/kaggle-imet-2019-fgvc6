@@ -1,3 +1,7 @@
+from os.path import join
+from pathlib import Path
+from glob import glob
+import pickle
 import argparse
 
 import chainer
@@ -10,14 +14,10 @@ from chainerui.extensions import CommandsExtension
 from chainerui.utils import save_args
 
 from PIL import Image
-from os.path import join
-from pathlib import Path
-from glob import glob
-import pickle
-
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import KFold
+from tqdm import tqdm
 
 from lr_finder import LRFinder
 from predict import ImgaugTransformer, ResNet, DebugModel, infer, num_attributes
@@ -82,7 +82,10 @@ def find_optimal_threshold(y, true, per_attribute_search):
         num_attributes if per_attribute_search else 1, dtype=np.float32)
     step = 0.01
 
-    for j in range(len(thresholds)):
+    search_range = range(len(thresholds))
+    if per_attribute_search:
+        search_range = tqdm(search_range)
+    for j in search_range:
         f2_scores = []
         for i in np.arange(0, 1, step):
             thresholds[j] = i
