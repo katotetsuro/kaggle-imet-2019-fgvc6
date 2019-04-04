@@ -284,14 +284,14 @@ def main(args=None):
     base_model = DebugModel() if args.debug_model else ResNet()
     chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
     if args.gpu >= 0:
-        model.to_gpu()
+        base_model.to_gpu()
 
     pred, true = infer(test_iter, base_model, args.gpu)
     thresholds, mean_threshold, scores = find_optimal_threshold(
         pred, true, True)
     print('しきい値:{} で F2スコア{}'.format(mean_threshold, scores))
     thresholds = chainer.backends.cuda.to_cpu(thresholds)
-    np.save(open(Path(args.out).joinpath('thresholds.npy'), 'wb'), thresholds)
+    np.save(open(str(Path(args.out).joinpath('thresholds.npy')), 'wb'), thresholds)
 
 
 if __name__ == '__main__':
