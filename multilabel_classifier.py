@@ -136,22 +136,21 @@ class DebugModel(chainer.Chain):
         return h
 
 
-def f2_score(y, true, threshold):
-    xp = chainer.backends.cuda.get_array_module(y)
-    if isinstance(y, chainer.Variable):
-        y = y.array
-    pred = y > threshold
+def f2_score(pred, true):
+    xp = chainer.backends.cuda.get_array_module(pred)
     tp = xp.sum(pred * true, axis=1)
-    fp = xp.sum(pred * xp.logical_not(true), axis=1)
-    fn = xp.sum(xp.logical_not(pred) * true, axis=1)
-    p = tp/(tp+fp+1e-8)
-    r = tp/(tp+fn+1e-8)
+    relevant = xp.sum(pred, axis=1)
+    support = xp.sum(true, axis=1)
+    p = tp/(relevant+1e-8)
+    r = tp/(support+1e-8)
     f2 = 5*p*r/(4*p+r+1e-8)
     return xp.mean(p), xp.mean(r), xp.mean(f2)
 
 
-def find_optimal_threshold(pred, true):
-    f2_scores = np.array([f2_score(pred, true, i)
+def find_optimal_threshold(y, true):
+    if isinstance(y, chainer.Variable):
+        y = y.array
+    f2_scores = np.array([f2_score(y > i, true)
                           for i in np.arange(0, 1, 0.01)])
     best_threshold_index = np.argmax(f2_scores[:, 2])
     best_threshold = best_threshold_index * 0.01
