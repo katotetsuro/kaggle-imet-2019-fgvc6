@@ -17,12 +17,10 @@ import pickle
 
 import numpy as np
 import pandas as pd
-from imgaug import augmenters as iaa
 from sklearn.model_selection import KFold
 
 from lr_finder import LRFinder
-
-num_attributes = 1103
+from predict import ImgaugTransformer, ResNet, DebugModel, infer, num_attributes
 
 
 class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
@@ -47,50 +45,6 @@ class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
         return image, one_hot_attributes
 
 
-class ImageDataset(chainer.dataset.DatasetMixin):
-    def __init__(self, image_files):
-        super().__init__()
-        self.image_files = image_files
-
-    def __len__(self):
-        return len(self.image_files)
-
-    def get_example(self, i):
-        image = Image.open(self.image_files[i])
-        image = image.convert('RGB')
-        image = np.asarray(image).astype(np.uint8)
-        return image,
-
-
-class ImgaugTransformer(chainer.datasets.TransformDataset):
-    def __init__(self, size, train):
-        self.seq = iaa.Sequential([
-            iaa.Resize((size, size))
-        ])
-        if train:
-            self.seq.append(iaa.OneOf([
-                iaa.Affine(rotate=0),
-                iaa.Affine(rotate=90),
-                iaa.Affine(rotate=180),
-                iaa.Affine(rotate=270),
-                iaa.Fliplr(0.5),
-            ]))
-
-    def __call__(self, in_data):
-        if len(in_data) == 2:
-            x, t = in_data
-            x = self.seq.augment_image(x)
-            # to chainer style
-            x = x.transpose(2, 0, 1).astype(np.float32) / 255.0
-            return x, t
-        elif len(in_data) == 1:
-            x, = in_data
-            x = self.seq.augment_image(x)
-            # to chainer style
-            x = x.transpose(2, 0, 1).astype(np.float32) / 255.0
-            return x,
-
-
 def get_dataset(data_dir, size, limit):
     kf = KFold(n_splits=10, shuffle=True, random_state=0)
     df = pd.read_csv(join(data_dir, 'train.csv'))
@@ -105,38 +59,6 @@ def get_dataset(data_dir, size, limit):
     test = chainer.datasets.TransformDataset(
         test, ImgaugTransformer(size, False))
     return train, test
-
-
-class ResNet(chainer.Chain):
-    def __init__(self):
-        super().__init__()
-        with self.init_scope():
-            self.res = chainer.links.model.vision.resnet.ResNet50Layers(
-                pretrained_model='auto')
-            self.fc = chainer.links.Linear(None, num_attributes)
-
-    @chainer.static_graph
-    def forward(self, x):
-        h = self.res.forward(x, layers=['pool5'])['pool5']
-        h = self.fc(h)
-        return h
-
-
-class DebugModel(chainer.Chain):
-    def __init__(self):
-        print('using debug model')
-        super().__init__()
-        with self.init_scope():
-            self.conv1 = chainer.links.Convolution2D(3, 64, ksize=3, stride=2)
-            self.fc = chainer.links.Linear(None, num_attributes)
-
-    @chainer.static_graph
-    def forward(self, x):
-        h = self.conv1(x)
-        ksize = h.shape[2]
-        h = F.average_pooling_2d(h, ksize)
-        h = self.fc(h)
-        return h
 
 
 def f2_score(pred, true):
@@ -231,29 +153,6 @@ class TrainChain(chainer.Chain):
                                  'threshold': mean_threshold}, self)
 
 
-def infer(data_iter, model, gpu):
-    with chainer.using_config('train', False), chainer.using_config('enable_backprop', False):
-        data_iter.reset()
-        pred = []
-        true = []
-        for batch in data_iter:
-            batch = chainer.dataset.concat_examples(batch, device=gpu)
-            if len(batch) == 2:
-                x, t = batch
-                true.append(chainer.backends.cuda.to_cpu(t))
-            else:
-                x, = batch
-            y = model(x)
-            y = F.sigmoid(y)
-            pred.append(chainer.backends.cuda.to_cpu(y.array))
-    pred = np.concatenate(pred)
-    if len(true):
-        true = np.concatenate(true)
-        return pred, true
-    else:
-        return pred
-
-
 def main(args=None):
     chainer.global_config.autotune = True
     chainer.cuda.set_max_workspace_size(512*1024*1024)
@@ -284,7 +183,6 @@ def main(args=None):
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
-    pickle.dump(args, open(str(Path(args.out).joinpath('args.pkl')), 'wb'))
 
     train, test = get_dataset(args.data_dir, args.size, args.limit)
     base_model = DebugModel() if args.debug_model else ResNet()
@@ -379,6 +277,9 @@ def main(args=None):
     # Run the training
     trainer.run()
 
+    # save args with pickle for prediction time
+    pickle.dump(args, open(str(Path(args.out).joinpath('args.pkl')), 'wb'))
+
     # find optimal threshold
     base_model = DebugModel() if args.debug_model else ResNet()
     chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
@@ -393,11 +294,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-
-# kaggleで動かす用のコード
-# args = [
-#     '--data-dir', '../input',
-#     '--size', '128',
-#     '--hour', '6'
-# ]
-# main(args)
