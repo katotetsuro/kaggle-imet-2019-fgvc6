@@ -180,12 +180,16 @@ def main(args=None):
     parser.add_argument('--data-dir', type=str, default='data')
     parser.add_argument('--hour', type=int, default=6)
     parser.add_argument('--lr-search', action='store_true')
+    parser.add_argument('--pretrained', type=str, default='')
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
 
     train, test = get_dataset(args.data_dir, args.size, args.limit)
     base_model = DebugModel() if args.debug_model else ResNet()
+    if args.pretrained:
+        print('loading pretrained model: {}'.format(args.pretrained))
+        chainer.serializers.load_npz(args.pretrained, base_model)
     model = TrainChain(base_model, args.weight_positive_sample,
                        loss_fn=args.loss_function)
     if args.gpu >= 0:
@@ -253,9 +257,6 @@ def main(args=None):
     # Take a snapshot of Model which has best F2 score.
     trainer.extend(extensions.snapshot_object(
         model.model, 'bestmodel'), trigger=triggers.MaxValueTrigger('validation/main/f2'))
-    # MaxValueTriggerがちゃんと使えてるか確認できるまで、毎エポック保存する
-    trainer.extend(extensions.snapshot_object(
-        model.model, 'model_{.updater.epoch}'), trigger=(1, 'epoch'))
 
     # Write a log of evaluation statistics for each epoch
     trainer.extend(extensions.LogReport(trigger=(100, 'iteration')))
