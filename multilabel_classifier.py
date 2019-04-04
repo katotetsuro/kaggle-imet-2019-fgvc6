@@ -6,6 +6,8 @@ import chainer.functions as F
 from chainer import training
 from chainer.training import extensions
 from chainer.training import triggers
+from chainerui.extensions import CommandsExtension
+from chainerui.utils import save_args
 
 from PIL import Image
 from os.path import join
@@ -278,10 +280,11 @@ def main(args=None):
     parser.add_argument('--limit', type=int, default=None)
     parser.add_argument('--data-dir', type=str, default='data')
     parser.add_argument('--hour', type=int, default=6)
+    parser.add_argument('--lr-search', action='store_true')
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
-    pickle.dump(args, open(str(Path(args.out).joinpath('args')), 'wb'))
+    pickle.dump(args, open(str(Path(args.out).joinpath('args.pkl')), 'wb'))
 
     train, test = get_dataset(args.data_dir, args.size, args.limit)
     base_model = DebugModel() if args.debug_model else ResNet()
@@ -335,11 +338,15 @@ def main(args=None):
     if args.optimizer == 'sgd':
         trainer.extend(extensions.ExponentialShift(
             'lr', 0.5), trigger=(2, 'epoch'))
-        trainer.extend(LRFinder(1e-7, 1, 5, optimizer),
-                       trigger=(1, 'iteration'))
+        if args.lr_search:
+            print('最適な学習率を探します')
+            trainer.extend(LRFinder(1e-7, 1, 5, optimizer),
+                           trigger=(1, 'iteration'))
     elif args.optimizer == 'adam':
-        trainer.extend(LRFinder(1e-7, 1, 5, optimizer,
-                                lr_key='alpha'), trigger=(1, 'iteration'))
+        if args.lr_search:
+            print('最適な学習率を探します')
+            trainer.extend(LRFinder(1e-7, 1, 5, optimizer,
+                                    lr_key='alpha'), trigger=(1, 'iteration'))
 
     # Take a snapshot of Trainer at each epoch
     trainer.extend(extensions.snapshot(
@@ -356,11 +363,14 @@ def main(args=None):
     trainer.extend(extensions.LogReport(trigger=(100, 'iteration')))
 
     trainer.extend(extensions.PrintReport(
-        ['epoch', 'main/loss', 'validation/main/loss',
-         'main/accuracy', 'validation/main/precision', 'validation/main/recall',
-         'validation/main/f2', 'validation/main/threshold', 'elapsed_time']))
+        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'validation/main/loss',
+         'validation/main/precision', 'validation/main/recall',
+         'validation/main/f2', 'validation/main/threshold']))
 
     trainer.extend(extensions.ProgressBar())
+    trainer.extend(extensions.observe_lr(), trigger=(100, 'iteration'))
+    trainer.extend(CommandsExtension())
+    save_args(args, args.out)
 
     if args.resume:
         # Resume from a snapshot
