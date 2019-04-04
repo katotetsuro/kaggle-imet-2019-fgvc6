@@ -109,7 +109,7 @@ class ResNet(chainer.Chain):
         super().__init__()
         with self.init_scope():
             self.res = chainer.links.model.vision.resnet.ResNet50Layers(
-                pretrained_model=None)
+                pretrained_model='auto')
             self.fc = chainer.links.Linear(None, num_attributes)
 
     @chainer.static_graph
