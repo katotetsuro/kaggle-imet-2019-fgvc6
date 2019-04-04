@@ -161,7 +161,7 @@ def find_optimal_threshold(y, true):
             s = f2_score(y > thresholds, true)
             f2_scores.append(s)
 
-        f2_scores = np.asarray(f2_scores)
+        f2_scores = xp.asarray(f2_scores)
         best_threshold_index = xp.argmax(f2_scores[:, 2])
         best_threshold = best_threshold_index * step
         thresholds[j] = best_threshold
