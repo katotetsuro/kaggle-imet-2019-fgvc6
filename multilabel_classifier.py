@@ -11,6 +11,7 @@ from PIL import Image
 from os.path import join
 from pathlib import Path
 from glob import glob
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -263,7 +264,7 @@ def main(args=None):
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
-    # TODO save args
+    pickle.dump(args, open(Path(args.out).joinpath('args'), 'wb'))
 
     train, test = get_dataset(args.data_dir, args.size, args.limit)
     base_model = DebugModel() if args.debug_model else ResNet()
@@ -347,30 +348,13 @@ def main(args=None):
     # Run the training
     trainer.run()
 
-    # predict
+    # find optimal threshold
+    base_model = DebugModel() if args.debug_model else ResNet()
     chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
 
     pred, true = infer(test_iter, base_model, args.gpu)
     best_threshold, scores = find_optimal_threshold(pred, true)
     print('しきい値:{} で F2スコア{}'.format(best_threshold, scores))
-
-    image_files = glob(join(args.data_dir, 'test/*.png'))
-    test = ImageDataset(image_files)
-    test = chainer.datasets.TransformDataset(
-        test, ImgaugTransformer(args.size, False))
-    test_iter = chainer.iterators.MultithreadIterator(
-        test, args.batchsize, repeat=False, shuffle=False, n_threads=8)
-    pred = infer(test_iter, base_model, args.gpu)
-    pred = pred > best_threshold
-    attributes = []
-    for p in pred:
-        attr = np.nonzero(p)[0]
-        attr = map(str, attr)
-        attributes.append(' '.join(attr))
-    submit_df = pd.DataFrame()
-    submit_df['id'] = [Path(p).stem for p in image_files]
-    submit_df['attribute_ids'] = attributes
-    submit_df.to_csv('submission.csv', index=False)
 
 
 if __name__ == '__main__':
