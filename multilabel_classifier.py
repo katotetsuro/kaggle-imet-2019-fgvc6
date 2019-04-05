@@ -46,7 +46,7 @@ class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
 
 
 def get_dataset(data_dir, size, limit):
-    kf = KFold(n_splits=10, shuffle=True, random_state=0)
+    kf = KFold(n_splits=5, shuffle=True, random_state=0)
     df = pd.read_csv(join(data_dir, 'train.csv'))
     train, test = next(iter(kf.split(df.index)))
     if limit is not None:
@@ -110,15 +110,15 @@ class TrainChain(chainer.Chain):
             self.loss_fn = focal_loss
         elif loss_fn == 'sigmoid':
             self.loss_fn = lambda x, t: F.sigmoid_cross_entropy(
-                x, t, reduce='no')
+                x, t, reduce='mean')
         else:
             raise ValueError('unknown loss function. {}'.format(loss_fn))
 
     def loss(self, y, t):
         loss = self.loss_fn(y, t)
-        xp = chainer.backends.cuda.get_array_module(t)
-        weights = xp.where(t == 0, 1, self.weight)
-        loss = F.mean(loss * weights)
+        # xp = chainer.backends.cuda.get_array_module(t)
+        # weights = xp.where(t == 0, 1, self.weight)
+        # loss = F.mean(loss * weights)
         return loss
 
     def forward(self, x, t):
