@@ -32,7 +32,8 @@ class ImageDataset(chainer.dataset.DatasetMixin):
 class ImgaugTransformer(chainer.datasets.TransformDataset):
     def __init__(self, size, train):
         self.seq = iaa.Sequential([
-            iaa.Resize((size, size))
+            iaa.Resize((size, size)),
+            iaa.Crop((0, 50))
         ])
         if train:
             self.seq.append(iaa.OneOf([
