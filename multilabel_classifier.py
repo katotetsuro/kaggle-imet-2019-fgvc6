@@ -238,7 +238,7 @@ def main(args=None):
 
     # Take a snapshot of Trainer at each epoch
     trainer.extend(extensions.snapshot(
-        filename='snaphot_epoch_{.updater.epoch}'))
+        filename='snaphot_epoch_{.updater.epoch}'), trigger=(10, 'epoch'))
 
     # Take a snapshot of Model which has best F2 score.
     trainer.extend(extensions.snapshot_object(
