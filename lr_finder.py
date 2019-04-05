@@ -5,6 +5,7 @@ from chainer.training.extension import Extension
 
 class LRFinder(Extension):
     def __init__(self, min_lr, max_lr, factor, optimizer, loss_key='main/loss', lr_key='lr'):
+        super().__init__()
         self.min_lr = min_lr
         self.max_lr = max_lr
         self.factor = factor

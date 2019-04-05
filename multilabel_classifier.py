@@ -72,33 +72,17 @@ def f2_score(pred, true):
     return xp.mean(p), xp.mean(r), xp.mean(f2)
 
 
-def find_optimal_threshold(y, true, per_attribute_search):
+def find_optimal_threshold(y, true):
     if isinstance(y, chainer.Variable):
         y = y.array
-    # num_attributesの数だけ独立にしきい値を探していく
     y = chainer.backends.cuda.to_cpu(y)
     true = chainer.backends.cuda.to_cpu(true)
-    thresholds = np.zeros(
-        num_attributes if per_attribute_search else 1, dtype=np.float32)
-    step = 0.01
 
-    search_range = range(len(thresholds))
-    if per_attribute_search:
-        search_range = tqdm(search_range)
-    for j in search_range:
-        f2_scores = []
-        for i in np.arange(0, 1, step):
-            thresholds[j] = i
-            s = f2_score(y > thresholds, true)
-            f2_scores.append(s)
-
-        f2_scores = np.asarray(f2_scores)
-        best_threshold_index = np.argmax(f2_scores[:, 2])
-        best_threshold = best_threshold_index * step
-        thresholds[j] = best_threshold
-
-    mean_threshold = np.mean(thresholds)
-    return thresholds, mean_threshold, f2_scores[best_threshold_index]
+    f2_scores = np.array([f2_score(y > i, true)
+                          for i in np.arange(0, 1, 0.01)])
+    best_threshold_index = np.argmax(f2_scores[:, 2])
+    best_threshold = best_threshold_index * 0.01
+    return best_threshold, f2_scores[best_threshold_index]
 
 
 def focal_loss(logit, y_true):
@@ -147,13 +131,12 @@ class TrainChain(chainer.Chain):
         y = self.model(x)
         loss = self.loss_fn(y, t)
         y = F.sigmoid(y)
-        thresholds, mean_threshold, (precision,
-                                     recall, f2) = find_optimal_threshold(y, t, False)
+        threshold, (precision, recall, f2) = find_optimal_threshold(y, t)
         chainer.reporter.report({'loss': loss,
                                  'precision': precision,
                                  'recall': recall,
                                  'f2': f2,
-                                 'threshold': mean_threshold}, self)
+                                 'threshold': threshold}, self)
 
 
 def main(args=None):
@@ -291,11 +274,9 @@ def main(args=None):
         base_model.to_gpu()
 
     pred, true = infer(test_iter, base_model, args.gpu)
-    thresholds, mean_threshold, scores = find_optimal_threshold(
-        pred, true, True)
-    print('しきい値:{} で F2スコア{}'.format(mean_threshold, scores))
-    thresholds = chainer.backends.cuda.to_cpu(thresholds)
-    np.save(open(str(Path(args.out).joinpath('thresholds.npy')), 'wb'), thresholds)
+    threshold, scores = find_optimal_threshold(pred, true)
+    print('しきい値:{} で F2スコア{}'.format(threshold, scores))
+    np.save(open(str(Path(args.out).joinpath('thresholds.npy')), 'wb'), threshold)
 
 
 if __name__ == '__main__':
