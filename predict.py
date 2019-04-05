@@ -32,16 +32,17 @@ class ImageDataset(chainer.dataset.DatasetMixin):
 class ImgaugTransformer(chainer.datasets.TransformDataset):
     def __init__(self, size, train):
         self.seq = iaa.Sequential([
-            iaa.Resize((size, size)),
-            iaa.Crop((0, 50))
+            iaa.Resize((size, size))
         ])
         if train:
             self.seq.append(iaa.OneOf([
-                iaa.Affine(rotate=0),
-                iaa.Affine(rotate=90),
-                iaa.Affine(rotate=180),
-                iaa.Affine(rotate=270),
+                iaa.Crop((0, 50)),
                 iaa.Fliplr(0.5),
+                iaa.Affine(
+                    scale={"x": (0.9, 1.1), "y": (0.9, 1.1)},
+                    translate_percent={"x": (-0.1, 0.1), "y": (-0.1, 0.1)},
+                    rotate=(-20, 20),
+                )
             ]))
 
     def __call__(self, in_data):
@@ -65,12 +66,16 @@ class ResNet(chainer.Chain):
         with self.init_scope():
             self.res = chainer.links.model.vision.resnet.ResNet50Layers(
                 pretrained_model='auto')
-            self.fc = chainer.links.Linear(None, num_attributes)
+            self.fc1 = chainer.links.Linear(None, 512)
+            self.fc2 = chainer.links.Linear(None, num_attributes)
 
     @chainer.static_graph
     def forward(self, x):
         h = self.res.forward(x, layers=['pool5'])['pool5']
-        h = self.fc(h)
+        h = self.fc1(h)
+        h = F.relu(h)
+        h = F.dropout(h)
+        h = self.fc2(h)
         return h
 
 
