@@ -155,7 +155,6 @@ def main(args=None):
                         help='Directory to output the result')
     parser.add_argument('--resume', '-r', default='',
                         help='Resume the training from snapshot')
-    parser.add_argument('--debug-model', action='store_true')
     parser.add_argument('--weight-positive-sample',
                         '-w', type=float, default=1)
     parser.add_argument('--loss-function',
@@ -168,16 +167,13 @@ def main(args=None):
     parser.add_argument('--lr-search', action='store_true')
     parser.add_argument('--pretrained', type=str, default='')
     parser.add_argument(
-        '--backbone', choices=['resnet', 'seresnext'], default='resnet')
+        '--backbone', choices=['resnet', 'seresnext', 'debug_model'], default='resnet')
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
 
     train, test = get_dataset(args.data_dir, args.size, args.limit)
-    if args.debug_model:
-        base_model = DebugModel()
-    else:
-        base_model = backbone_catalog[args.backbone]()
+    base_model = backbone_catalog[args.backbone]()
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))

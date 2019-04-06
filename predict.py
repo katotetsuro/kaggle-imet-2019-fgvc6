@@ -13,7 +13,7 @@ import numpy as np
 
 try:
     from chainercv.links.model.senet import SEResNeXt50
-except ModuleNotFoundError:
+except ImportError:
     print('kaggle kernelではchainercvを直接importできないので、dillでロードする')
 
 num_attributes = 1103
@@ -104,12 +104,6 @@ class SEResNeXt(chainer.Chain):
         return h
 
 
-backbone_catalog = {
-    'resnet': ResNet,
-    'seresnext': SEResNeXt
-}
-
-
 class DebugModel(chainer.Chain):
     def __init__(self):
         print('using debug model')
@@ -125,6 +119,13 @@ class DebugModel(chainer.Chain):
         h = F.average_pooling_2d(h, ksize)
         h = self.fc(h)
         return h
+
+
+backbone_catalog = {
+    'debug_model': DebugModel,
+    'resnet': ResNet,
+    'seresnext': SEResNeXt
+}
 
 
 def infer(data_iter, model, gpu):
