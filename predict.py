@@ -11,6 +11,11 @@ from imgaug import augmenters as iaa
 import pandas as pd
 import numpy as np
 
+try:
+    from chainercv.links.model.senet import SEResNeXt50
+except ModuleNotFoundError:
+    print('kaggle kernelではchainercvを直接importできないので、dillでロードする')
+
 num_attributes = 1103
 
 
@@ -77,6 +82,32 @@ class ResNet(chainer.Chain):
         h = F.dropout(h)
         h = self.fc2(h)
         return h
+
+
+class SEResNeXt(chainer.Chain):
+    """ResNetクラスとほとんどかわらないんだけど、SEResNextはstatic_graphにできないっぽい？
+    """
+
+    def __init__(self):
+        super().__init__()
+        with self.init_scope():
+            self.res = SEResNeXt50()
+            self.fc1 = chainer.links.Linear(None, 512)
+            self.fc2 = chainer.links.Linear(None, num_attributes)
+
+    def forward(self, x):
+        h = self.res(x)
+        h = self.fc1(h)
+        h = F.relu(h)
+        h = F.dropout(h)
+        h = self.fc2(h)
+        return h
+
+
+backbone_catalog = {
+    'resnet': ResNet,
+    'seresnext': SEResNeXt
+}
 
 
 class DebugModel(chainer.Chain):

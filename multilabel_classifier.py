@@ -20,7 +20,7 @@ from sklearn.model_selection import KFold
 from tqdm import tqdm
 
 from lr_finder import LRFinder
-from predict import ImgaugTransformer, ResNet, DebugModel, infer, num_attributes
+from predict import ImgaugTransformer, ResNet, DebugModel, infer, num_attributes, backbone_catalog
 
 
 class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
@@ -167,12 +167,18 @@ def main(args=None):
     parser.add_argument('--hour', type=int, default=6)
     parser.add_argument('--lr-search', action='store_true')
     parser.add_argument('--pretrained', type=str, default='')
+    parser.add_argument(
+        '--backbone', choices=['resnet', 'seresnext'], default='resnet')
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
 
     train, test = get_dataset(args.data_dir, args.size, args.limit)
-    base_model = DebugModel() if args.debug_model else ResNet()
+    if args.debug_model:
+        base_model = DebugModel()
+    else:
+        base_model = backbone_catalog[args.backbone]()
+
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
         chainer.serializers.load_npz(args.pretrained, base_model)
@@ -243,6 +249,8 @@ def main(args=None):
     # Take a snapshot of Model which has best F2 score.
     trainer.extend(extensions.snapshot_object(
         model.model, 'bestmodel'), trigger=triggers.MaxValueTrigger('validation/main/f2'))
+    trainer.extend(extensions.snapshot_object(
+        model.model, 'model_{.updater.epoch}'), trigger=(5, 'epoch'))
 
     # Write a log of evaluation statistics for each epoch
     trainer.extend(extensions.LogReport(trigger=(100, 'iteration')))
@@ -268,7 +276,6 @@ def main(args=None):
     pickle.dump(args, open(str(Path(args.out).joinpath('args.pkl')), 'wb'))
 
     # find optimal threshold
-    base_model = DebugModel() if args.debug_model else ResNet()
     chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
     if args.gpu >= 0:
         base_model.to_gpu()
