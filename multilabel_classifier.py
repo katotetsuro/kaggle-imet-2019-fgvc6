@@ -227,7 +227,7 @@ def main(args=None):
 
     if args.optimizer == 'sgd':
         trainer.extend(extensions.ExponentialShift(
-            'lr', 0.5), trigger=(5, 'epoch'))
+            'lr', 0.5), trigger=(10, 'epoch'))
         if args.lr_search:
             print('最適な学習率を探します')
             trainer.extend(LRFinder(1e-7, 1, 5, optimizer),

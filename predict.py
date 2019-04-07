@@ -92,6 +92,7 @@ class SEResNeXt(chainer.Chain):
         super().__init__()
         with self.init_scope():
             self.res = SEResNeXt50()
+            self.res.pick = 'pool5'
             self.fc1 = chainer.links.Linear(None, 512)
             self.fc2 = chainer.links.Linear(None, num_attributes)
 
@@ -154,28 +155,36 @@ def infer(data_iter, model, gpu):
 def main():
     parser = ArgumentParser()
     parser.add_argument('dir', type=str)
-    args = parser.parse_args()
-    data_dir = args.dir
+    parser.add_argument('tta', type=int, default=4)
+    current_args = parser.parse_args()
+    data_dir = current_args.dir
     args = pickle.load(open(Path(data_dir).joinpath('args.pkl'), 'rb'))
 
     # pretrained modelの場所、test用画像の場所は決め打ちする
     # args.data_dir = '../input'
 
-    base_model = DebugModel() if args.debug_model else ResNet()
+    base_model = backbone_catalog[args.backbone]()
     chainer.serializers.load_npz(join(data_dir, 'bestmodel'), base_model)
 
     best_threshold = np.load(join(data_dir, 'thresholds.npy'))
-    image_files = glob(join(args.data_dir, 'test/*.png'))
+    image_files = glob(join(args.data_dir, 'test/*.png'))[:5]
     test = ImageDataset(image_files)
     test = chainer.datasets.TransformDataset(
-        test, ImgaugTransformer(args.size, False))
+        test, ImgaugTransformer(args.size, True))
     test_iter = chainer.iterators.MultithreadIterator(
         test, args.batchsize, repeat=False, shuffle=False, n_threads=8)
-    pred = infer(test_iter, base_model, args.gpu)
-    pred = pred > best_threshold
+
+    preds = []
+    for _ in range(current_args.tta):
+        pred = infer(test_iter, base_model, args.gpu)
+        preds.append(pred)
+
+    pred = np.mean(preds, axis=0)
+    pred = pred > best_threshold * args.tta
     attributes = []
     for p in pred:
-        attr = np.nonzero(p)[0]
+        # 10件以内に抑制する
+        attr = np.nonzero(p)[0][:10]
         attr = map(str, attr)
         attributes.append(' '.join(attr))
     submit_df = pd.DataFrame()
@@ -184,6 +193,5 @@ def main():
     submit_df.to_csv('submission.csv', index=False)
 
 
-# kaggle kernelのときはおもむろに起動しないといけない？
 if __name__ == '__main__':
     main()
