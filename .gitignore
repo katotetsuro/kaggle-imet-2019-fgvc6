@@ -7,3 +7,4 @@ result
 submission.csv
 memo.md
 pretrained
+*.dill

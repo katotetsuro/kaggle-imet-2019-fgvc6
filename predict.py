@@ -10,11 +10,15 @@ import chainer.functions as F
 from imgaug import augmenters as iaa
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
 
 try:
     from chainercv.links.model.senet import SEResNeXt50
 except ImportError:
     print('kaggle kernelではchainercvを直接importできないので、dillでロードする')
+    import dill
+    SEResNeXt50 = dill.load(
+        open('../input/model-definitions/seresnext50_def.dill', 'rb'))
 
 num_attributes = 1103
 
@@ -159,21 +163,33 @@ def infer(data_iter, model, gpu):
         return pred
 
 
-def main():
+def main(_args=None):
     parser = ArgumentParser()
     parser.add_argument('dir', type=str)
     parser.add_argument('tta', type=int, default=4)
-    current_args = parser.parse_args()
-    data_dir = current_args.dir
-    args = pickle.load(open(Path(data_dir).joinpath('args.pkl'), 'rb'))
+    parser.add_argument('threshold', type=float, default=0.28)
+    launch_args = parser.parse_args() if _args is None else parser.parse_args(
+        _args)
+    pretrained_model_dir = launch_args.dir
 
-    # pretrained modelの場所、test用画像の場所は決め打ちする
-    # args.data_dir = '../input'
+    # saved args which used in training phase
+    args = pickle.load(
+        open(Path(pretrained_model_dir).joinpath('args.pkl'), 'rb'))
+
+    # test用画像の場所は決め打ちする
+    if _args is not None:
+        print('kaggle environment detected. overwriting data_dir...')
+        args.data_dir = '../input/imet-2019-fgvc6'
 
     base_model = backbone_catalog[args.backbone]()
-    chainer.serializers.load_npz(join(data_dir, 'bestmodel'), base_model)
+    chainer.serializers.load_npz(
+        join(pretrained_model_dir, 'bestmodel'), base_model)
+    if args.gpu >= 0:
+        # kaggleはGPU一個だけ
+        chainer.backends.cuda.get_device_from_id(0).use()
+        base_model.to_gpu()
 
-    best_threshold = np.load(join(data_dir, 'thresholds.npy'))
+    best_threshold = launch_args.threshold
     image_files = glob(join(args.data_dir, 'test/*.png'))
     test = ImageDataset(image_files)
     test = chainer.datasets.TransformDataset(
@@ -182,7 +198,7 @@ def main():
         test, args.batchsize, repeat=False, shuffle=False, n_threads=8)
 
     preds = []
-    for _ in range(current_args.tta):
+    for _ in tqdm(range(launch_args.tta), total=launch_args.tta):
         pred = infer(test_iter, base_model, args.gpu)
         preds.append(pred)
 
@@ -202,3 +218,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+#    main(['../input/xxxxx', '4', '0.28'])
