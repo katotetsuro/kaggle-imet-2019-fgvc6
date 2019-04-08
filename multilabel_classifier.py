@@ -3,6 +3,8 @@ from pathlib import Path
 from glob import glob
 import pickle
 import argparse
+from collections import defaultdict, Counter
+import random
 
 import chainer
 import chainer.links as L
@@ -16,7 +18,6 @@ from chainerui.utils import save_args
 from PIL import Image
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import KFold
 from tqdm import tqdm
 
 from lr_finder import LRFinder
@@ -45,17 +46,42 @@ class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
         return image, one_hot_attributes
 
 
+def make_folds(n_folds: int, df: pd.DataFrame) -> pd.DataFrame:
+    """copyright https://github.com/lopuhin/kaggle-imet-2019/blob/master/imet/make_folds.py
+    """
+    cls_counts = Counter(cls for classes in df['attribute_ids'].str.split()
+                         for cls in classes)
+    fold_cls_counts = defaultdict(int)
+    folds = [-1] * len(df)
+    for item in tqdm(df.sample(frac=1, random_state=42).itertuples(),
+                     total=len(df)):
+        cls = min(item.attribute_ids.split(), key=lambda cls: cls_counts[cls])
+        fold_counts = [(f, fold_cls_counts[f, cls]) for f in range(n_folds)]
+        min_count = min([count for _, count in fold_counts])
+        random.seed(item.Index)
+        fold = random.choice([f for f, count in fold_counts
+                              if count == min_count])
+        folds[item.Index] = fold
+        for cls in item.attribute_ids.split():
+            fold_cls_counts[fold, cls] += 1
+    df['fold'] = folds
+    return df
+
+
 def get_dataset(data_dir, size, limit):
-    kf = KFold(n_splits=5, shuffle=True, random_state=0)
     df = pd.read_csv(join(data_dir, 'train.csv'))
-    train, test = next(iter(kf.split(df.index)))
+    df = make_folds(5, df)
+    train = df[df.fold != 0]
+    test = df[df.fold == 0]
+    train = train.drop(columns=['fold'])
+    test = test.drop(columns=['fold'])
     if limit is not None:
         train = train[:limit]
         test = test[:limit]
-    train = MultilabelPandasDataset(df.iloc[train], join(data_dir, 'train'))
+    train = MultilabelPandasDataset(train, join(data_dir, 'train'))
     train = chainer.datasets.TransformDataset(
         train, ImgaugTransformer(size, True))
-    test = MultilabelPandasDataset(df.iloc[test], join(data_dir, 'train'))
+    test = MultilabelPandasDataset(test, join(data_dir, 'train'))
     test = chainer.datasets.TransformDataset(
         test, ImgaugTransformer(size, False))
     return train, test

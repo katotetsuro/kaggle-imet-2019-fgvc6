@@ -102,7 +102,7 @@ class SEResNeXt(chainer.Chain):
     def __init__(self):
         super().__init__()
         with self.init_scope():
-            self.res = SEResNeXt50()
+            self.res = SEResNeXt50(pretrained_model='imagenet')
             self.res.pick = 'pool5'
             self.fc1 = chainer.links.Linear(None, 512)
             self.fc2 = chainer.links.Linear(None, num_attributes)
