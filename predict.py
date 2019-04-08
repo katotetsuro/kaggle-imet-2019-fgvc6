@@ -50,18 +50,25 @@ class ImgaugTransformer(chainer.datasets.TransformDataset):
                 )
             ]))
 
+        self.mean = np.array([0.485, 0.456, 0.406],
+                             dtype=np.float32).reshape(3, 1, 1)
+        self.std = np.array([0.229, 0.224, 0.225],
+                            dtype=np.float32).reshape(3, 1, 1)
+
     def __call__(self, in_data):
         if len(in_data) == 2:
             x, t = in_data
             x = self.seq.augment_image(x)
             # to chainer style
             x = x.transpose(2, 0, 1).astype(np.float32) / 255.0
+            x = (x - self.mean) / self.std
             return x, t
         elif len(in_data) == 1:
             x, = in_data
             x = self.seq.augment_image(x)
             # to chainer style
             x = x.transpose(2, 0, 1).astype(np.float32) / 255.0
+            x = (x - self.mean) / self.std
             return x,
 
 
@@ -167,7 +174,7 @@ def main():
     chainer.serializers.load_npz(join(data_dir, 'bestmodel'), base_model)
 
     best_threshold = np.load(join(data_dir, 'thresholds.npy'))
-    image_files = glob(join(args.data_dir, 'test/*.png'))[:5]
+    image_files = glob(join(args.data_dir, 'test/*.png'))
     test = ImageDataset(image_files)
     test = chainer.datasets.TransformDataset(
         test, ImgaugTransformer(args.size, True))
@@ -180,13 +187,13 @@ def main():
         preds.append(pred)
 
     pred = np.mean(preds, axis=0)
-    pred = pred > best_threshold * args.tta
+    indexes = np.argsort(pred, axis=1)[:, ::-1][:, :10]
     attributes = []
-    for p in pred:
-        # 10件以内に抑制する
-        attr = np.nonzero(p)[0][:10]
+    for i, p in zip(indexes, pred):
+        attr = i[p[i] > best_threshold]
         attr = map(str, attr)
         attributes.append(' '.join(attr))
+
     submit_df = pd.DataFrame()
     submit_df['id'] = [Path(p).stem for p in image_files]
     submit_df['attribute_ids'] = attributes
