@@ -5,6 +5,7 @@ import pickle
 import argparse
 from collections import defaultdict, Counter
 import random
+from itertools import combinations
 
 import chainer
 import chainer.links as L
@@ -68,8 +69,20 @@ def make_folds(n_folds: int, df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def count_cooccurrence(df):
+    co = np.zeros((num_attributes, num_attributes), dtype=np.int32)
+    for row in df.itertuples(index=False):
+        id, attr = row
+        for i, j in combinations(map(int, attr.split(' ')), 2):
+            co[i, j] += 1
+            co[j, i] += 1
+
+    return co
+
+
 def get_dataset(data_dir, size, limit):
     df = pd.read_csv(join(data_dir, 'train.csv'))
+    co = count_cooccurrence(df)
     df = make_folds(5, df)
     train = df[df.fold != 0]
     test = df[df.fold == 0]
@@ -84,7 +97,8 @@ def get_dataset(data_dir, size, limit):
     test = MultilabelPandasDataset(test, join(data_dir, 'train'))
     test = chainer.datasets.TransformDataset(
         test, ImgaugTransformer(size, False))
-    return train, test
+
+    return train, test, co
 
 
 def f2_score(pred, true):
@@ -111,7 +125,7 @@ def find_optimal_threshold(y, true):
     return best_threshold, f2_scores[best_threshold_index]
 
 
-def focal_loss(logit, y_true):
+def focal_loss(logit, y_true, cooccurrence):
     """from https://www.kaggle.com/mathormad/pretrained-resnet50-focal-loss
     """
     gamma = 2.0
@@ -126,39 +140,53 @@ def focal_loss(logit, y_true):
 
 
 class TrainChain(chainer.Chain):
-    def __init__(self, model, weight, loss_fn):
+    def __init__(self, model, weight, loss_fn, cooccurrence, co_coef):
         super().__init__()
         with self.init_scope():
             self.model = model
+            # model.to_gpu()でgpuに送ってほしい
+            self.cooccurrence = chainer.Variable(
+                (cooccurrence == 0).astype(np.float32))
 
         self.weight = weight
         if loss_fn == 'focal':
-            self.loss_fn = focal_loss
+            self.loss_fn = lambda x, t: focal_loss(x, t, self.cooccurrence)
         elif loss_fn == 'sigmoid':
             self.loss_fn = lambda x, t: F.sigmoid_cross_entropy(
                 x, t, reduce='mean')
         else:
             raise ValueError('unknown loss function. {}'.format(loss_fn))
 
+        self.co_coef = co_coef
+
     def loss(self, y, t):
         loss = self.loss_fn(y, t)
         # xp = chainer.backends.cuda.get_array_module(t)
         # weights = xp.where(t == 0, 1, self.weight)
         # loss = F.mean(loss * weights)
-        return loss
+
+        # cooccurrenceが0なのに共起したものへlossをかける
+        y = F.sigmoid(y)
+        xp = chainer.backend.cuda.get_array_module(self.cooccurrence)
+        co = F.einsum('ij, ik->ijk', y, y)
+        bad_co = co * self.cooccurrence
+        bad_co_loss = F.mean(bad_co)
+        return loss, bad_co_loss
 
     def forward(self, x, t):
         y = self.model(x)
-        loss = self.loss(y, t)
-        chainer.reporter.report({'loss': loss}, self)
-        return loss
+        loss, co_loss = self.loss(y, t)
+        chainer.reporter.report(
+            {'loss': loss, 'cooccurrence': co_loss}, self)
+        return loss + self.co_coef * co_loss
 
     def evaluate(self, x, t):
         y = self.model(x)
-        loss = self.loss_fn(y, t)
+        loss, co_loss = self.loss(y, t)
         y = F.sigmoid(y)
         threshold, (precision, recall, f2) = find_optimal_threshold(y, t)
         chainer.reporter.report({'loss': loss,
+                                 'cooccurrence': co_loss,
                                  'precision': precision,
                                  'recall': recall,
                                  'f2': f2,
@@ -194,18 +222,20 @@ def main(args=None):
     parser.add_argument('--pretrained', type=str, default='')
     parser.add_argument(
         '--backbone', choices=['resnet', 'seresnext', 'debug_model'], default='resnet')
+    parser.add_argument('--co-coef', type=float, default=4)
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
 
-    train, test = get_dataset(args.data_dir, args.size, args.limit)
+    train, test, cooccurrence = get_dataset(
+        args.data_dir, args.size, args.limit)
     base_model = backbone_catalog[args.backbone]()
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
         chainer.serializers.load_npz(args.pretrained, base_model)
     model = TrainChain(base_model, args.weight_positive_sample,
-                       loss_fn=args.loss_function)
+                       loss_fn=args.loss_function, cooccurrence=cooccurrence, co_coef=args.co_coef)
     if args.gpu >= 0:
         chainer.backends.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
@@ -278,9 +308,9 @@ def main(args=None):
     trainer.extend(extensions.LogReport(trigger=(100, 'iteration')))
 
     trainer.extend(extensions.PrintReport(
-        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'validation/main/loss',
-         'validation/main/precision', 'validation/main/recall',
-         'validation/main/f2', 'validation/main/threshold']))
+        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'main/cooccurrence', 'validation/main/loss',
+         'validation/main/cooccurrence', 'validation/main/precision',
+         'validation/main/recall', 'validation/main/f2', 'validation/main/threshold']))
 
     trainer.extend(extensions.ProgressBar())
     trainer.extend(extensions.observe_lr(), trigger=(100, 'iteration'))
