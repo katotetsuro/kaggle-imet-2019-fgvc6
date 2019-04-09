@@ -125,7 +125,7 @@ def find_optimal_threshold(y, true):
     return best_threshold, f2_scores[best_threshold_index]
 
 
-def focal_loss(logit, y_true, cooccurrence):
+def focal_loss(logit, y_true):
     """from https://www.kaggle.com/mathormad/pretrained-resnet50-focal-loss
     """
     gamma = 2.0
@@ -144,19 +144,17 @@ class TrainChain(chainer.Chain):
         super().__init__()
         with self.init_scope():
             self.model = model
-            # model.to_gpu()でgpuに送ってほしい
-            self.cooccurrence = chainer.Variable(
-                (cooccurrence == 0).astype(np.float32))
 
         self.weight = weight
         if loss_fn == 'focal':
-            self.loss_fn = lambda x, t: focal_loss(x, t, self.cooccurrence)
+            self.loss_fn = focal_loss
         elif loss_fn == 'sigmoid':
             self.loss_fn = lambda x, t: F.sigmoid_cross_entropy(
                 x, t, reduce='mean')
         else:
             raise ValueError('unknown loss function. {}'.format(loss_fn))
 
+        self.cooccurrence = (cooccurrence == 0).astype(np.float32)
         self.co_coef = co_coef
 
     def loss(self, y, t):
@@ -167,7 +165,9 @@ class TrainChain(chainer.Chain):
 
         # cooccurrenceが0なのに共起したものへlossをかける
         y = F.sigmoid(y)
-        xp = chainer.backend.cuda.get_array_module(self.cooccurrence)
+        xp = chainer.backend.cuda.get_array_module(y)
+        if xp == chainer.backends.cuda.cupy:
+            self.cooccurrence = chainer.backends.cuda.to_gpu(self.cooccurrence)
         co = F.einsum('ij, ik->ijk', y, y)
         bad_co = co * self.cooccurrence
         bad_co_loss = F.mean(bad_co)
