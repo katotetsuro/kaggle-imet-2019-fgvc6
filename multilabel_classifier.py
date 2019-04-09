@@ -155,6 +155,8 @@ class TrainChain(chainer.Chain):
             raise ValueError('unknown loss function. {}'.format(loss_fn))
 
         self.cooccurrence = (cooccurrence == 0).astype(np.float32)
+        # 対角成分はlossをかけない
+        self.cooccurrence -= np.eye(self.cooccurrence.shape[0])
         self.co_coef = co_coef
 
     def loss(self, y, t):
