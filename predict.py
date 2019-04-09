@@ -77,13 +77,18 @@ class ImgaugTransformer(chainer.datasets.TransformDataset):
 
 
 class ResNet(chainer.Chain):
-    def __init__(self):
+    def __init__(self, two_step):
         super().__init__()
+        self.two_step = two_step
         with self.init_scope():
             self.res = chainer.links.model.vision.resnet.ResNet50Layers(
                 pretrained_model='auto')
             self.fc1 = chainer.links.Linear(None, 512)
             self.fc2 = chainer.links.Linear(None, num_attributes)
+            if self.two_step:
+                print('using two step model')
+                self.fc3 = chainer.links.Linear(None, num_attributes)
+                self.fc4 = chainer.links.Linear(None, num_attributes)
 
     @chainer.static_graph
     def forward(self, x):
@@ -92,7 +97,14 @@ class ResNet(chainer.Chain):
         h = F.relu(h)
         h = F.dropout(h)
         h = self.fc2(h)
-        return h
+        if self.two_step:
+            i = self.fc3(F.sigmoid(h))
+            i = F.relu(i)
+            i = F.dropout(i)
+            i = self.fc4(i)
+            return h, i
+        else:
+            return h
 
 
 class SEResNeXt(chainer.Chain):
@@ -153,6 +165,8 @@ def infer(data_iter, model, gpu):
             else:
                 x, = batch
             y = model(x)
+            if isinstance(y, tuple):
+                y = y[1]
             y = F.sigmoid(y)
             pred.append(chainer.backends.cuda.to_cpu(y.array))
     pred = np.concatenate(pred)

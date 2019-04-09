@@ -160,17 +160,20 @@ class TrainChain(chainer.Chain):
         self.co_coef = co_coef
 
     def loss(self, y, t):
+        if isinstance(y, tuple):
+            y, z = y
+        else:
+            z = F.sigmoid(y)
         loss = self.loss_fn(y, t)
         # xp = chainer.backends.cuda.get_array_module(t)
         # weights = xp.where(t == 0, 1, self.weight)
         # loss = F.mean(loss * weights)
 
         # cooccurrenceが0なのに共起したものへlossをかける
-        y = F.sigmoid(y)
-        xp = chainer.backend.cuda.get_array_module(y)
+        xp = chainer.backend.cuda.get_array_module(z)
         if xp == chainer.backends.cuda.cupy:
             self.cooccurrence = chainer.backends.cuda.to_gpu(self.cooccurrence)
-        co = F.einsum('ij, ik->ijk', y, y)
+        co = F.einsum('ij, ik->ijk', z, z)
         bad_co = co * self.cooccurrence
         bad_co_loss = F.mean(F.sum(bad_co, axis=0))
         return loss, bad_co_loss
@@ -185,6 +188,8 @@ class TrainChain(chainer.Chain):
     def evaluate(self, x, t):
         y = self.model(x)
         loss, co_loss = self.loss(y, t)
+        if isinstance(y, tuple):
+            y = y[1]
         y = F.sigmoid(y)
         threshold, (precision, recall, f2) = find_optimal_threshold(y, t)
         chainer.reporter.report({'loss': loss,
@@ -225,13 +230,14 @@ def main(args=None):
     parser.add_argument(
         '--backbone', choices=['resnet', 'seresnext', 'debug_model'], default='resnet')
     parser.add_argument('--co-coef', type=float, default=4)
+    parser.add_argument('--two-step', action='store_true')
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
 
     train, test, cooccurrence = get_dataset(
         args.data_dir, args.size, args.limit)
-    base_model = backbone_catalog[args.backbone]()
+    base_model = backbone_catalog[args.backbone](args.two_step)
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
