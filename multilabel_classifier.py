@@ -162,9 +162,13 @@ class TrainChain(chainer.Chain):
     def loss(self, y, t):
         if isinstance(y, tuple):
             y, z = y
+            z = F.sigmoid(z)
+            second_stage_loss = self.loss_fn(z, t)
+            two_stage = True
         else:
             z = F.sigmoid(y)
-        loss = self.loss_fn(y, t)
+            two_stage = False
+        first_stage_loss = self.loss_fn(y, t)
         # xp = chainer.backends.cuda.get_array_module(t)
         # weights = xp.where(t == 0, 1, self.weight)
         # loss = F.mean(loss * weights)
@@ -176,28 +180,46 @@ class TrainChain(chainer.Chain):
         co = F.einsum('ij, ik->ijk', z, z)
         bad_co = co * self.cooccurrence
         bad_co_loss = F.mean(F.sum(bad_co, axis=0))
-        return loss, bad_co_loss
+
+        if two_stage:
+            return first_stage_loss, second_stage_loss, bad_co_loss
+        else:
+            return first_stage_loss, bad_co_loss
 
     def forward(self, x, t):
         y = self.model(x)
-        loss, co_loss = self.loss(y, t)
-        chainer.reporter.report(
-            {'loss': loss, 'cooccurrence': co_loss}, self)
-        return loss + self.co_coef * co_loss
+        losses = self.loss(y, t)
+        if len(losses) == 2:
+            chainer.reporter.report(
+                {'first_stage_loss': losses[0], 'cooccurrence': losses[1]}, self)
+            return losses[0] + self.co_coef * losses[-1]
+        else:
+            chainer.reporter.report(
+                {'first_stage_loss': losses[0], 'second_stage_loss': losses[1], 'cooccurrence': losses[2]}, self)
+            return losses[0] + losses[1] + self.co_coef * losses[-1]
 
     def evaluate(self, x, t):
         y = self.model(x)
-        loss, co_loss = self.loss(y, t)
+        losses = self.loss(y, t)
         if isinstance(y, tuple):
             y = y[1]
         y = F.sigmoid(y)
         threshold, (precision, recall, f2) = find_optimal_threshold(y, t)
-        chainer.reporter.report({'loss': loss,
-                                 'cooccurrence': co_loss,
-                                 'precision': precision,
-                                 'recall': recall,
-                                 'f2': f2,
-                                 'threshold': threshold}, self)
+        if len(losses) == 2:
+            chainer.reporter.report({'first_stage_loss': losses[0],
+                                     'cooccurrence': losses[-1],
+                                     'precision': precision,
+                                     'recall': recall,
+                                     'f2': f2,
+                                     'threshold': threshold}, self)
+        else:
+            chainer.reporter.report({'first_stage_loss': losses[0],
+                                     'second_stage_loss': losses[1],
+                                     'cooccurrence': losses[-1],
+                                     'precision': precision,
+                                     'recall': recall,
+                                     'f2': f2,
+                                     'threshold': threshold}, self)
 
 
 def main(args=None):
@@ -241,7 +263,7 @@ def main(args=None):
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
-        chainer.serializers.load_npz(args.pretrained, base_model)
+        chainer.serializers.load_npz(args.pretrained, base_model, strict=False)
     model = TrainChain(base_model, args.weight_positive_sample,
                        loss_fn=args.loss_function, cooccurrence=cooccurrence, co_coef=args.co_coef)
     if args.gpu >= 0:
@@ -316,8 +338,8 @@ def main(args=None):
     trainer.extend(extensions.LogReport(trigger=(100, 'iteration')))
 
     trainer.extend(extensions.PrintReport(
-        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'main/cooccurrence', 'validation/main/loss',
-         'validation/main/cooccurrence', 'validation/main/precision',
+        ['epoch', 'lr', 'elapsed_time', 'main/first_stage_loss', 'main/second_stage_loss', 'main/cooccurrence', 'validation/main/first_stage_loss',
+         'validation/main/second_stage_loss', 'validation/main/cooccurrence', 'validation/main/precision',
          'validation/main/recall', 'validation/main/f2', 'validation/main/threshold']))
 
     trainer.extend(extensions.ProgressBar())
