@@ -170,7 +170,7 @@ class TrainChain(chainer.Chain):
             self.cooccurrence = chainer.backends.cuda.to_gpu(self.cooccurrence)
         co = F.einsum('ij, ik->ijk', y, y)
         bad_co = co * self.cooccurrence
-        bad_co_loss = F.mean(bad_co)
+        bad_co_loss = F.mean(F.sum(bad_co, axi=0))
         return loss, bad_co_loss
 
     def forward(self, x, t):
