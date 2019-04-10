@@ -125,12 +125,11 @@ def find_optimal_threshold(y, true):
     return best_threshold, f2_scores[best_threshold_index]
 
 
-def focal_loss(logit, y_true):
+def focal_loss(y_pred, y_true):
     """from https://www.kaggle.com/mathormad/pretrained-resnet50-focal-loss
     """
     gamma = 2.0
     epsilon = 1e-5
-    y_pred = F.sigmoid(logit)
     pt = y_pred * y_true + (1-y_pred) * (1-y_true)
     pt = F.clip(pt, epsilon, 1-epsilon)
     CE = -F.log(pt)
@@ -149,8 +148,8 @@ class TrainChain(chainer.Chain):
         if loss_fn == 'focal':
             self.loss_fn = focal_loss
         elif loss_fn == 'sigmoid':
-            self.loss_fn = lambda x, t: F.sigmoid_cross_entropy(
-                x, t, reduce='mean')
+            self.loss_fn = lambda x, t: F.sum(F.sigmoid_cross_entropy(
+                x, t, reduce='no'))
         else:
             raise ValueError('unknown loss function. {}'.format(loss_fn))
 
@@ -162,13 +161,13 @@ class TrainChain(chainer.Chain):
     def loss(self, y, t):
         if isinstance(y, tuple):
             y, z = y
-            z = F.sigmoid(z)
             second_stage_loss = self.loss_fn(z, t)
+            z = F.sigmoid(z)
             two_stage = True
         else:
             z = F.sigmoid(y)
             two_stage = False
-        first_stage_loss = self.loss_fn(y, t)
+        first_stage_loss = self.loss_fn(F.sigmoid(y), t)
         # xp = chainer.backends.cuda.get_array_module(t)
         # weights = xp.where(t == 0, 1, self.weight)
         # loss = F.mean(loss * weights)
@@ -276,7 +275,7 @@ def main(args=None):
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
     optimizer.setup(model)
-    optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
+    # optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
 
     train_iter = chainer.iterators.MultithreadIterator(
         train, args.batchsize, n_threads=8)
