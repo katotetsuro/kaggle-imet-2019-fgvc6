@@ -197,6 +197,9 @@ class TrainChain(chainer.Chain):
     def freeze_extractor(self):
         self.model.res.disable_update()
 
+    def unfreeze_extractor(self):
+        self.model.res.enable_update()
+
 
 def main(args=None):
     chainer.global_config.autotune = True
@@ -322,6 +325,9 @@ def main(args=None):
     trainer.extend(extensions.observe_lr(), trigger=(100, 'iteration'))
     trainer.extend(CommandsExtension())
     save_args(args, args.out)
+
+    trainer.extend(lambda trainer: model.unfreeze_extractor(),
+                   trigger=(1, 'epoch'))
 
     if args.resume:
         # Resume from a snapshot

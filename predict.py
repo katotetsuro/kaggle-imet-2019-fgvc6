@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 try:
     from chainercv.links.model.senet import SEResNeXt50
+    from chainercv.links.model import resnet
 except ImportError:
     print('kaggle kernelではchainercvを直接importできないので、dillでロードする')
     import dill
@@ -79,14 +80,14 @@ class ResNet(chainer.Chain):
     def __init__(self):
         super().__init__()
         with self.init_scope():
-            self.res = chainer.links.model.vision.resnet.ResNet50Layers(
-                pretrained_model='auto')
+            self.res = resnet.ResNet50(pretrained_model='imagenet')
+            self.res.pick = 'pool5'
             self.fc = chainer.links.Linear(
-                None, num_attributes, initialW=chainer.initializers.uniform.Uniform(sqrt(2048)))
+                None, num_attributes, initialW=chainer.initializers.uniform.Uniform(sqrt(1/2048)))
 
     @chainer.static_graph
     def forward(self, x):
-        h = self.res.forward(x, layers=['pool5'])['pool5']
+        h = self.res(x)
         h = self.fc(h)
         return h
 
