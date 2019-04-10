@@ -134,7 +134,7 @@ def focal_loss(y_pred, y_true):
     pt = F.clip(pt, epsilon, 1-epsilon)
     CE = -F.log(pt)
     FL = (1-pt)**gamma * CE
-    loss = F.mean(F.sum(FL, axis=1))
+    loss = F.sum(FL, axis=1)
     return loss
 
 
@@ -146,7 +146,7 @@ class TrainChain(chainer.Chain):
 
         self.weight = weight
         if loss_fn == 'focal':
-            self.loss_fn = focal_loss
+            self.loss_fn = lambda x, t: F.sum(focal_loss(x, t))
         elif loss_fn == 'sigmoid':
             self.loss_fn = lambda x, t: F.sum(F.sigmoid_cross_entropy(
                 x, t, reduce='no'))
@@ -171,54 +171,28 @@ class TrainChain(chainer.Chain):
         # xp = chainer.backends.cuda.get_array_module(t)
         # weights = xp.where(t == 0, 1, self.weight)
         # loss = F.mean(loss * weights)
-
-        # cooccurrenceが0なのに共起したものへlossをかける
-        xp = chainer.backend.cuda.get_array_module(z)
-        if xp == chainer.backends.cuda.cupy:
-            self.cooccurrence = chainer.backends.cuda.to_gpu(self.cooccurrence)
-        co = F.einsum('ij, ik->ijk', z, z)
-        bad_co = co * self.cooccurrence
-        bad_co_loss = F.mean(F.sum(bad_co, axis=0))
-
-        if two_stage:
-            return first_stage_loss, second_stage_loss, bad_co_loss
-        else:
-            return first_stage_loss, bad_co_loss
+        return first_stage_loss
 
     def forward(self, x, t):
         y = self.model(x)
-        losses = self.loss(y, t)
-        if len(losses) == 2:
-            chainer.reporter.report(
-                {'first_stage_loss': losses[0], 'cooccurrence': losses[1]}, self)
-            return losses[0] + self.co_coef * losses[-1]
-        else:
-            chainer.reporter.report(
-                {'first_stage_loss': losses[0], 'second_stage_loss': losses[1], 'cooccurrence': losses[2]}, self)
-            return losses[0] + losses[1] + self.co_coef * losses[-1]
+        loss = self.loss(y, t)
+        chainer.reporter.report(
+            {'loss': loss}, self)
+        return loss
 
     def evaluate(self, x, t):
         y = self.model(x)
-        losses = self.loss(y, t)
-        if isinstance(y, tuple):
-            y = y[1]
-        y = F.sigmoid(y)
-        threshold, (precision, recall, f2) = find_optimal_threshold(y, t)
-        if len(losses) == 2:
-            chainer.reporter.report({'first_stage_loss': losses[0],
-                                     'cooccurrence': losses[-1],
-                                     'precision': precision,
-                                     'recall': recall,
-                                     'f2': f2,
-                                     'threshold': threshold}, self)
-        else:
-            chainer.reporter.report({'first_stage_loss': losses[0],
-                                     'second_stage_loss': losses[1],
-                                     'cooccurrence': losses[-1],
-                                     'precision': precision,
-                                     'recall': recall,
-                                     'f2': f2,
-                                     'threshold': threshold}, self)
+        loss = self.loss(y, t)
+        chainer.reporter.report(
+            {'loss': loss}, self)
+
+        threshold, (precision, recall, f2) = find_optimal_threshold(
+            F.sigmoid(y), t)
+        chainer.reporter.report({'loss': loss,
+                                 'precision': precision,
+                                 'recall': recall,
+                                 'f2': f2,
+                                 'threshold': threshold}, self)
 
 
 def main(args=None):
@@ -258,7 +232,7 @@ def main(args=None):
 
     train, test, cooccurrence = get_dataset(
         args.data_dir, args.size, args.limit)
-    base_model = backbone_catalog[args.backbone](args.two_step)
+    base_model = backbone_catalog[args.backbone]()
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
@@ -337,8 +311,7 @@ def main(args=None):
     trainer.extend(extensions.LogReport(trigger=(100, 'iteration')))
 
     trainer.extend(extensions.PrintReport(
-        ['epoch', 'lr', 'elapsed_time', 'main/first_stage_loss', 'main/second_stage_loss', 'main/cooccurrence', 'validation/main/first_stage_loss',
-         'validation/main/second_stage_loss', 'validation/main/cooccurrence', 'validation/main/precision',
+        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'validation/main/loss', 'validation/main/precision',
          'validation/main/recall', 'validation/main/f2', 'validation/main/threshold']))
 
     trainer.extend(extensions.ProgressBar())
