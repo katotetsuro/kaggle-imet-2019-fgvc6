@@ -229,7 +229,7 @@ def main(args=None):
     parser.add_argument('--lr-search', action='store_true')
     parser.add_argument('--pretrained', type=str, default='')
     parser.add_argument(
-        '--backbone', choices=['resnet', 'seresnext', 'debug_model'], default='resnet')
+        '--backbone', choices=['resnet', 'seresnet', 'seresnext', 'debug_model'], default='resnet')
     parser.add_argument('--co-coef', type=float, default=4)
     parser.add_argument('--two-step', action='store_true')
     args = parser.parse_args() if args is None else parser.parse_args(args)
@@ -250,7 +250,7 @@ def main(args=None):
         model.to_gpu()
 
     if args.optimizer == 'adam':
-        optimizer = chainer.optimizers.Adam()
+        optimizer = chainer.optimizers.Adam(alpha=1e-4)
     elif args.optimizer == 'sgd':
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
@@ -333,11 +333,11 @@ def main(args=None):
         # Resume from a snapshot
         chainer.serializers.load_npz(args.resume, trainer)
 
-    # Run the training
-    trainer.run()
-
     # save args with pickle for prediction time
     pickle.dump(args, open(str(Path(args.out).joinpath('args.pkl')), 'wb'))
+
+    # Run the training
+    trainer.run()
 
     # find optimal threshold
     chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)

@@ -14,13 +14,17 @@ import numpy as np
 from tqdm import tqdm
 
 try:
-    from chainercv.links.model.senet import SEResNeXt50
-    from chainercv.links.model import resnet
+    from chainercv.links.model.senet import SEResNet50, SEResNeXt50
+    from chainercv.links.model.resnet import ResNet50
 except ImportError:
     print('kaggle kernelではchainercvを直接importできないので、dillでロードする')
     import dill
+    SEResNet50 = dill.load(
+        open('../input/model-definitions/seresnet50_def.dill', 'rb'))
     SEResNeXt50 = dill.load(
         open('../input/model-definitions/seresnext50_def.dill', 'rb'))
+    ResNet50 = dill.load(
+        open('../input/model-definitions/resnet50_def.dill', 'rb'))
 
 num_attributes = 1103
 
@@ -80,7 +84,23 @@ class ResNet(chainer.Chain):
     def __init__(self):
         super().__init__()
         with self.init_scope():
-            self.res = resnet.ResNet50(pretrained_model='imagenet')
+            self.res = ResNet50(pretrained_model='imagenet')
+            self.res.pick = 'pool5'
+            self.fc = chainer.links.Linear(
+                None, num_attributes, initialW=chainer.initializers.uniform.Uniform(sqrt(1/2048)))
+
+    @chainer.static_graph
+    def forward(self, x):
+        h = self.res(x)
+        h = self.fc(h)
+        return h
+
+
+class SEResNet(chainer.Chain):
+    def __init__(self):
+        super().__init__()
+        with self.init_scope():
+            self.res = SEResNet50(pretrained_model='imagenet')
             self.res.pick = 'pool5'
             self.fc = chainer.links.Linear(
                 None, num_attributes, initialW=chainer.initializers.uniform.Uniform(sqrt(1/2048)))
@@ -107,6 +127,7 @@ class SEResNeXt(chainer.Chain):
     def forward(self, x):
         h = self.res(x)
         h = self.fc1(h)
+        # ここにh.unchainを入れる方が最初のエポックはめちゃくちゃ早くなる
         h = F.relu(h)
         h = F.dropout(h)
         h = self.fc2(h)
@@ -133,6 +154,7 @@ class DebugModel(chainer.Chain):
 backbone_catalog = {
     'debug_model': DebugModel,
     'resnet': ResNet,
+    'seresnet': SEResNet,
     'seresnext': SEResNeXt
 }
 
