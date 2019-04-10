@@ -146,7 +146,7 @@ class TrainChain(chainer.Chain):
 
         self.weight = weight
         if loss_fn == 'focal':
-            self.loss_fn = lambda x, t: F.sum(focal_loss(x, t))
+            self.loss_fn = lambda x, t: F.sum(focal_loss(F.sigmoid(x), t))
         elif loss_fn == 'sigmoid':
             self.loss_fn = lambda x, t: F.sum(F.sigmoid_cross_entropy(
                 x, t, reduce='no'))
@@ -167,7 +167,7 @@ class TrainChain(chainer.Chain):
         else:
             z = F.sigmoid(y)
             two_stage = False
-        first_stage_loss = self.loss_fn(F.sigmoid(y), t)
+        first_stage_loss = self.loss_fn(y, t)
         # xp = chainer.backends.cuda.get_array_module(t)
         # weights = xp.where(t == 0, 1, self.weight)
         # loss = F.mean(loss * weights)
@@ -249,6 +249,8 @@ def main(args=None):
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
     optimizer.setup(model)
+    for p in model.model.res.params():
+        p.update_rule.enabled = False
     # optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
 
     train_iter = chainer.iterators.MultithreadIterator(
