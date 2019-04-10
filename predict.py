@@ -54,25 +54,23 @@ class ImgaugTransformer(chainer.datasets.TransformDataset):
                 )
             ]))
 
-        self.mean = np.array([0.485, 0.456, 0.406],
+        self.mean = np.array([123.15163084, 115.90288257, 103.0626238],
                              dtype=np.float32).reshape(3, 1, 1)
-        self.std = np.array([0.229, 0.224, 0.225],
-                            dtype=np.float32).reshape(3, 1, 1)
 
     def __call__(self, in_data):
         if len(in_data) == 2:
             x, t = in_data
             x = self.seq.augment_image(x)
             # to chainer style
-            x = x.transpose(2, 0, 1).astype(np.float32) / 255.0
-            x = (x - self.mean) / self.std
+            x = x.transpose(2, 0, 1).astype(np.float32)
+            x -= self.mean
             return x, t
         elif len(in_data) == 1:
             x, = in_data
             x = self.seq.augment_image(x)
             # to chainer style
-            x = x.transpose(2, 0, 1).astype(np.float32) / 255.0
-            x = (x - self.mean) / self.std
+            x = x.transpose(2, 0, 1).astype(np.float32)
+            x -= self.mean
             return x,
 
 

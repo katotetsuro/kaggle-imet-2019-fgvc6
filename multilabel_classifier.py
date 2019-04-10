@@ -194,6 +194,9 @@ class TrainChain(chainer.Chain):
                                  'f2': f2,
                                  'threshold': threshold}, self)
 
+    def freeze_extractor(self):
+        self.model.res.disable_update()
+
 
 def main(args=None):
     chainer.global_config.autotune = True
@@ -249,8 +252,7 @@ def main(args=None):
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
     optimizer.setup(model)
-    for p in model.model.res.params():
-        p.update_rule.enabled = False
+    model.freeze_extractor()
     # optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
 
     train_iter = chainer.iterators.MultithreadIterator(
