@@ -3,8 +3,9 @@ from argparse import ArgumentParser
 from pathlib import Path
 from os.path import join
 from glob import glob
-from PIL import Image
+from math import sqrt
 
+from PIL import Image
 import chainer
 import chainer.functions as F
 from imgaug import augmenters as iaa
@@ -80,7 +81,8 @@ class ResNet(chainer.Chain):
         with self.init_scope():
             self.res = chainer.links.model.vision.resnet.ResNet50Layers(
                 pretrained_model='auto')
-            self.fc = chainer.links.Linear(None, num_attributes)
+            self.fc = chainer.links.Linear(
+                None, num_attributes, initialW=chainer.initializers.uniform.Uniform(sqrt(2048)))
 
     @chainer.static_graph
     def forward(self, x):
