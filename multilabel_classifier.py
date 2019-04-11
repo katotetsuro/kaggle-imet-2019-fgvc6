@@ -258,9 +258,9 @@ def main(args=None):
     optimizer.setup(model)
     model.freeze_extractor()
 
-    train_iter = chainer.iterators.MultithreadIterator(
-        train, args.batchsize, n_threads=8)
-    test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize*2, n_threads=8,
+    train_iter = chainer.iterators.MultiprocessIterator(
+        train, args.batchsize, n_processes=8, n_prefetch=2)
+    test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
                                                       repeat=False, shuffle=False)
 
     class TimeupTrigger():
