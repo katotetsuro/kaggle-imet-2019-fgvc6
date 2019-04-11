@@ -257,8 +257,8 @@ def main(args=None):
 
     train_iter = chainer.iterators.MultithreadIterator(
         train, args.batchsize, n_threads=8)
-    test_iter = chainer.iterators.MultiprocessIterator(test, args.batchsize*2, n_processes=8,
-                                                       repeat=False, shuffle=False)
+    test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize*2, n_threads=8,
+                                                      repeat=False, shuffle=False)
 
     class TimeupTrigger():
         def __init__(self, epoch):
@@ -310,7 +310,7 @@ def main(args=None):
     # Take a snapshot of Model which has best val loss.
     # Because searching best threshold for each evaluation takes too much time.
     trainer.extend(extensions.snapshot_object(
-        model.model, 'bestmodel'), trigger=triggers.MaxValueTrigger('validation/main/loss'))
+        model.model, 'bestmodel'), trigger=triggers.MinValueTrigger('validation/main/loss'))
     trainer.extend(extensions.snapshot_object(
         model.model, 'model_{.updater.epoch}'), trigger=(5, 'epoch'))
 
