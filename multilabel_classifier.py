@@ -183,16 +183,14 @@ class TrainChain(chainer.Chain):
     def evaluate(self, x, t):
         y = self.model(x)
         loss = self.loss(y, t)
-        chainer.reporter.report(
-            {'loss': loss}, self)
 
-        threshold, (precision, recall, f2) = find_optimal_threshold(
-            F.sigmoid(y), t)
+        precision, recall, f2 = f2_score(y.array > 0.1, t)
+        # threshold, (precision, recall, f2) = find_optimal_threshold(
+        #     F.sigmoid(y), t)
         chainer.reporter.report({'loss': loss,
                                  'precision': precision,
                                  'recall': recall,
-                                 'f2': f2,
-                                 'threshold': threshold}, self)
+                                 'f2': f2}, self)
 
     def freeze_extractor(self):
         self.model.res.disable_update()
@@ -256,12 +254,11 @@ def main(args=None):
 
     optimizer.setup(model)
     model.freeze_extractor()
-    # optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
 
     train_iter = chainer.iterators.MultithreadIterator(
         train, args.batchsize, n_threads=8)
-    test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
-                                                      repeat=False, shuffle=False)
+    test_iter = chainer.iterators.MultiprocessIterator(test, args.batchsize*2, n_processes=8,
+                                                       repeat=False, shuffle=False)
 
     class TimeupTrigger():
         def __init__(self, epoch):
@@ -292,6 +289,8 @@ def main(args=None):
                                         eval_func=model.evaluate))
 
     if args.optimizer == 'sgd':
+        # Adamにweight decayはあんまりよくないらしい
+        optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
         trainer.extend(extensions.ExponentialShift(
             'lr', 0.5), trigger=(10, 'epoch'))
         if args.lr_search:
@@ -308,9 +307,10 @@ def main(args=None):
     trainer.extend(extensions.snapshot(
         filename='snaphot_epoch_{.updater.epoch}'), trigger=(10, 'epoch'))
 
-    # Take a snapshot of Model which has best F2 score.
+    # Take a snapshot of Model which has best val loss.
+    # Because searching best threshold for each evaluation takes too much time.
     trainer.extend(extensions.snapshot_object(
-        model.model, 'bestmodel'), trigger=triggers.MaxValueTrigger('validation/main/f2'))
+        model.model, 'bestmodel'), trigger=triggers.MaxValueTrigger('validation/main/loss'))
     trainer.extend(extensions.snapshot_object(
         model.model, 'model_{.updater.epoch}'), trigger=(5, 'epoch'))
 

@@ -220,6 +220,7 @@ def main(_args=None):
 
     preds = []
     for _ in tqdm(range(launch_args.tta), total=launch_args.tta):
+        print('tta')
         pred = infer(test_iter, base_model, args.gpu)
         preds.append(pred)
 
@@ -235,6 +236,7 @@ def main(_args=None):
     submit_df['id'] = [Path(p).stem for p in image_files]
     submit_df['attribute_ids'] = attributes
     submit_df.to_csv('submission.csv', index=False)
+    print(submit_df.head(5))
 
 
 if __name__ == '__main__':
