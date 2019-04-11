@@ -193,10 +193,12 @@ class TrainChain(chainer.Chain):
                                  'f2': f2}, self)
 
     def freeze_extractor(self):
-        self.model.res.disable_update()
+        if self.model.res.update_enabled:
+            self.model.res.disable_update()
 
     def unfreeze_extractor(self):
-        self.model.res.enable_update()
+        if not self.model.res.update_enabled:
+            self.model.res.enable_update()
 
 
 def main(args=None):
@@ -230,6 +232,7 @@ def main(args=None):
         '--backbone', choices=['resnet', 'seresnet', 'seresnext', 'debug_model'], default='resnet')
     parser.add_argument('--co-coef', type=float, default=4)
     parser.add_argument('--two-step', action='store_true')
+    parser.add_argument('--log-interval', type=int, default=100)
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
@@ -315,14 +318,16 @@ def main(args=None):
         model.model, 'model_{.updater.epoch}'), trigger=(5, 'epoch'))
 
     # Write a log of evaluation statistics for each epoch
-    trainer.extend(extensions.LogReport(trigger=(100, 'iteration')))
+    trainer.extend(extensions.LogReport(
+        trigger=(args.log_interval, 'iteration')))
 
     trainer.extend(extensions.PrintReport(
         ['epoch', 'lr', 'elapsed_time', 'main/loss', 'validation/main/loss', 'validation/main/precision',
          'validation/main/recall', 'validation/main/f2', 'validation/main/threshold']))
 
-    trainer.extend(extensions.ProgressBar())
-    trainer.extend(extensions.observe_lr(), trigger=(100, 'iteration'))
+    trainer.extend(extensions.ProgressBar(update_interval=args.log_interval))
+    trainer.extend(extensions.observe_lr(), trigger=(
+        args.log_interval, 'iteration'))
     trainer.extend(CommandsExtension())
     save_args(args, args.out)
 
