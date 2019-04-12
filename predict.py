@@ -28,6 +28,10 @@ except ImportError:
 
 num_attributes = 1103
 
+# copyright https://github.com/lopuhin/kaggle-imet-2019/blob/master/imet/utils.py
+import os
+ON_KAGGLE: bool = 'KAGGLE_WORKING_DIR' in os.environ
+
 
 class ImageDataset(chainer.dataset.DatasetMixin):
     def __init__(self, image_files):
@@ -80,7 +84,8 @@ class ResNet(chainer.Chain):
     def __init__(self, dropout):
         super().__init__()
         with self.init_scope():
-            self.res = ResNet50(pretrained_model='imagenet')
+            self.res = ResNet50(
+                pretrained_model=None if ON_KAGGLE else 'imagenet')
             self.res.pick = 'pool5'
             self.fc = chainer.links.Linear(
                 None, num_attributes, initialW=chainer.initializers.uniform.Uniform(sqrt(1/2048)))
@@ -100,7 +105,8 @@ class SEResNet(chainer.Chain):
     def __init__(self):
         super().__init__()
         with self.init_scope():
-            self.res = SEResNet50(pretrained_model='imagenet')
+            self.res = SEResNet50(
+                pretrained_model=None if ON_KAGGLE else 'imagenet')
             self.res.pick = 'pool5'
             self.fc = chainer.links.Linear(
                 None, num_attributes, initialW=chainer.initializers.uniform.Uniform(sqrt(1/2048)))
@@ -119,7 +125,8 @@ class SEResNeXt(chainer.Chain):
     def __init__(self):
         super().__init__()
         with self.init_scope():
-            self.res = SEResNeXt50(pretrained_model='imagenet')
+            self.res = SEResNeXt50(
+                pretrained_model=None if ON_KAGGLE else 'imagenet')
             self.res.pick = 'pool5'
             self.fc1 = chainer.links.Linear(None, 512)
             self.fc2 = chainer.links.Linear(None, num_attributes)
@@ -202,7 +209,7 @@ def main(_args=None):
         print('kaggle environment detected. overwriting data_dir...')
         args.data_dir = '../input/imet-2019-fgvc6'
 
-    base_model = backbone_catalog[args.backbone]()
+    base_model = backbone_catalog[args.backbone](args.dropout)
     chainer.serializers.load_npz(
         join(pretrained_model_dir, 'bestmodel'), base_model)
     if args.gpu >= 0:
@@ -214,9 +221,9 @@ def main(_args=None):
     image_files = glob(join(args.data_dir, 'test/*.png'))
     test = ImageDataset(image_files)
     test = chainer.datasets.TransformDataset(
-        test, ImgaugTransformer(args.size, True))
-    test_iter = chainer.iterators.MultithreadIterator(
-        test, args.batchsize, repeat=False, shuffle=False, n_threads=8)
+        test, ImgaugTransformer(args.size, launch_args.tta > 1))
+    test_iter = chainer.iterators.MultiprocessIterator(
+        test, args.batchsize, repeat=False, shuffle=False, n_processes=8, n_prefetch=2)
 
     preds = []
     for _ in tqdm(range(launch_args.tta), total=launch_args.tta):
@@ -225,7 +232,7 @@ def main(_args=None):
         preds.append(pred)
 
     pred = np.mean(preds, axis=0)
-    indexes = np.argsort(pred, axis=1)[:, ::-1][:, :10]
+    indexes = np.argsort(pred, axis=1)[:, ::-1][:, :15]
     attributes = []
     for i, p in zip(indexes, pred):
         attr = i[p[i] > best_threshold]
