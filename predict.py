@@ -81,7 +81,7 @@ class ImgaugTransformer(chainer.datasets.TransformDataset):
 
 
 class ResNet(chainer.Chain):
-    def __init__(self):
+    def __init__(self, dropout):
         super().__init__()
         with self.init_scope():
             self.res = ResNet50(pretrained_model='imagenet')
@@ -89,9 +89,13 @@ class ResNet(chainer.Chain):
             self.fc = chainer.links.Linear(
                 None, num_attributes, initialW=chainer.initializers.uniform.Uniform(sqrt(1/2048)))
 
+        self.dropout = dropout
+
     @chainer.static_graph
     def forward(self, x):
         h = self.res(x)
+        if self.dropout:
+            h = F.dropout(h)
         h = self.fc(h)
         return h
 

@@ -184,7 +184,8 @@ class TrainChain(chainer.Chain):
         y = self.model(x)
         loss = self.loss(y, t)
 
-        precision, recall, f2 = f2_score(y.array > 0.1, t)
+        y = chainer.backends.cuda.to_cpu(y.array)
+        precision, recall, f2 = f2_score(y > 0.1, t)
         # threshold, (precision, recall, f2) = find_optimal_threshold(
         #     F.sigmoid(y), t)
         chainer.reporter.report({'loss': loss,
@@ -233,13 +234,14 @@ def main(args=None):
     parser.add_argument('--co-coef', type=float, default=4)
     parser.add_argument('--two-step', action='store_true')
     parser.add_argument('--log-interval', type=int, default=100)
+    parser.add_argument('--dropout', action='store_true')
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
 
     train, test, cooccurrence = get_dataset(
         args.data_dir, args.size, args.limit)
-    base_model = backbone_catalog[args.backbone]()
+    base_model = backbone_catalog[args.backbone](args.dropout)
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
