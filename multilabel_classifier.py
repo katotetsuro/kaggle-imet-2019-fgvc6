@@ -245,6 +245,7 @@ def main(args=None):
     parser.add_argument('--log-interval', type=int, default=100)
     parser.add_argument('--dropout', action='store_true')
     parser.add_argument('--find-threshold', action='store_true')
+    parser.add_argument('--finetune', action='store_true')
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
@@ -268,7 +269,10 @@ def main(args=None):
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
     optimizer.setup(model)
-    model.freeze_extractor()
+
+    if not args.finetune:
+        print('最初のエポックは特徴抽出層をfreezeします')
+        model.freeze_extractor()
 
     train_iter = chainer.iterators.MultiprocessIterator(
         train, args.batchsize, n_processes=8, n_prefetch=2)
