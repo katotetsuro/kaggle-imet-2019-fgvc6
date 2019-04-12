@@ -205,7 +205,7 @@ class TrainChain(chainer.Chain):
 
 def find_threshold(model, test_iter, gpu, out):
     if gpu >= 0:
-        base_model.to_gpu()
+        model.to_gpu()
     pred, true = infer(test_iter, model, gpu)
     threshold, scores = find_optimal_threshold(pred, true)
     print('しきい値:{} で F2スコア{}'.format(threshold, scores))
