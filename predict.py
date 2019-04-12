@@ -46,19 +46,15 @@ class ImageDataset(chainer.dataset.DatasetMixin):
 
 class ImgaugTransformer(chainer.datasets.TransformDataset):
     def __init__(self, size, train):
-        self.seq = iaa.Sequential([
+        self.seq = iaa.Sequential([iaa.OneOf([
+            iaa.CropToFixedSize(size, size),
             iaa.Resize((size, size))
-        ])
+        ]),  # end of OneOf
+            iaa.Fliplr(0.5),
+            iaa.PerspectiveTransform(0.01)])
+
         if train:
-            self.seq.append(iaa.OneOf([
-                iaa.Crop((0, 50)),
-                iaa.Fliplr(0.5),
-                iaa.Affine(
-                    scale={"x": (0.9, 1.1), "y": (0.9, 1.1)},
-                    translate_percent={"x": (-0.1, 0.1), "y": (-0.1, 0.1)},
-                    rotate=(-20, 20),
-                )
-            ]))
+            self.seq.append(iaa.CoarseSaltAndPepper(0.2, size_percent=0.01))
 
         self.mean = np.array([123.15163084, 115.90288257, 103.0626238],
                              dtype=np.float32).reshape(3, 1, 1)

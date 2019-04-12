@@ -185,6 +185,7 @@ class TrainChain(chainer.Chain):
         loss = self.loss(y, t)
 
         y = chainer.backends.cuda.to_cpu(y.array)
+        t = chainer.backends.cuda.to_cpu(t)
         precision, recall, f2 = f2_score(y > 0.1, t)
         # threshold, (precision, recall, f2) = find_optimal_threshold(
         #     F.sigmoid(y), t)
