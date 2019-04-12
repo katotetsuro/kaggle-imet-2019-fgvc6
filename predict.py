@@ -87,17 +87,18 @@ class ResNet(chainer.Chain):
             self.res = ResNet50(
                 pretrained_model=None if ON_KAGGLE else 'imagenet')
             self.res.pick = 'pool5'
-            self.fc = chainer.links.Linear(
-                None, num_attributes, initialW=chainer.initializers.uniform.Uniform(sqrt(1/2048)))
+            self.fc1 = chainer.links.Linear(None, 512)
+            self.fc2 = chainer.links.Linear(None, num_attributes)
 
         self.dropout = dropout
 
     @chainer.static_graph
     def forward(self, x):
         h = self.res(x)
+        h = self.fc1(h)
         if self.dropout:
             h = F.dropout(h)
-        h = self.fc(h)
+        h = self.fc2(h)
         return h
 
 
