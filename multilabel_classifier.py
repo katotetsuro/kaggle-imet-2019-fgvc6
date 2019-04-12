@@ -202,6 +202,15 @@ class TrainChain(chainer.Chain):
             self.model.res.enable_update()
 
 
+def find_threshold(model, test_iter, gpu, out):
+    if gpu >= 0:
+        base_model.to_gpu()
+    pred, true = infer(test_iter, model, gpu)
+    threshold, scores = find_optimal_threshold(pred, true)
+    print('しきい値:{} で F2スコア{}'.format(threshold, scores))
+    np.save(open(str(Path(out).joinpath('thresholds.npy')), 'wb'), threshold)
+
+
 def main(args=None):
     chainer.global_config.autotune = True
     chainer.cuda.set_max_workspace_size(512*1024*1024)
@@ -226,7 +235,6 @@ def main(args=None):
     parser.add_argument('--size', type=int, default=224)
     parser.add_argument('--limit', type=int, default=None)
     parser.add_argument('--data-dir', type=str, default='data')
-    parser.add_argument('--hour', type=int, default=6)
     parser.add_argument('--lr-search', action='store_true')
     parser.add_argument('--pretrained', type=str, default='')
     parser.add_argument(
@@ -235,6 +243,7 @@ def main(args=None):
     parser.add_argument('--two-step', action='store_true')
     parser.add_argument('--log-interval', type=int, default=100)
     parser.add_argument('--dropout', action='store_true')
+    parser.add_argument('--find-threshold', action='store_true')
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
@@ -265,29 +274,19 @@ def main(args=None):
     test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
                                                       repeat=False, shuffle=False)
 
-    class TimeupTrigger():
-        def __init__(self, epoch):
-            self.epoch = epoch
-
-        def __call__(self, trainer):
-            epoch = trainer.updater.epoch
-            if epoch > args.epoch:
-                return True
-            time = trainer.elapsed_time
-            if time > args.hour * 60 * 60:
-                print('時間切れで終了します。経過時間:{}'.format(time))
-                return True
-            return False
-
-        def get_training_length(self):
-            return self.epoch, 'epoch'
+    if args.find_threshold:
+        # train_iter, optimizerなど無駄なsetupもあるが。。
+        print('thresholdを探索して終了します')
+        chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
+        find_threshold(base_model, test_iter, args.gpu, args.out)
+        return
 
     # Set up a trainer
     updater = training.updaters.StandardUpdater(
         train_iter, optimizer, device=args.gpu,
         converter=lambda batch, device: chainer.dataset.concat_examples(batch, device=device))
     trainer = training.Trainer(
-        updater, TimeupTrigger(args.epoch), out=args.out)
+        updater, (args.epoch, 'epoch'), out=args.out)
 
     # Evaluate the model with the test dataset for each epoch
     trainer.extend(extensions.Evaluator(test_iter, model, device=args.gpu,
@@ -348,13 +347,7 @@ def main(args=None):
 
     # find optimal threshold
     chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
-    if args.gpu >= 0:
-        base_model.to_gpu()
-
-    pred, true = infer(test_iter, base_model, args.gpu)
-    threshold, scores = find_optimal_threshold(pred, true)
-    print('しきい値:{} で F2スコア{}'.format(threshold, scores))
-    np.save(open(str(Path(args.out).joinpath('thresholds.npy')), 'wb'), threshold)
+    find_threshold(base_model, test_iter, args.gpu, args.out)
 
 
 if __name__ == '__main__':
