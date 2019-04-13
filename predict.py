@@ -30,7 +30,7 @@ num_attributes = 1103
 
 # copyright https://github.com/lopuhin/kaggle-imet-2019/blob/master/imet/utils.py
 import os
-ON_KAGGLE: bool = 'KAGGLE_WORKING_DIR' in os.environ
+ON_KAGGLE = 'KAGGLE_WORKING_DIR' in os.environ
 
 
 class ImageDataset(chainer.dataset.DatasetMixin):
