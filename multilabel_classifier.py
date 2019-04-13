@@ -165,7 +165,7 @@ class TrainChain(chainer.Chain):
             z = F.sigmoid(z)
             two_stage = True
         else:
-            z = F.sigmoid(y)
+            #z = F.sigmoid(y)
             two_stage = False
         first_stage_loss = self.loss_fn(y, t)
         # xp = chainer.backends.cuda.get_array_module(t)
@@ -177,7 +177,7 @@ class TrainChain(chainer.Chain):
         y = self.model(x)
         loss = self.loss(y, t)
         chainer.reporter.report(
-            {'loss': loss}, self)
+            {'loss': loss/len(t)}, self)
         return loss
 
     # def evaluate(self, x, t):
@@ -233,7 +233,7 @@ class FScoreEvaluator(extensions.Evaluator):
                     it, target.model, self.device, target.loss_fn)
                 threshold, (precision, recall,
                             f2) = find_optimal_threshold(pred, true)
-                chainer.reporter.report({'loss': loss,
+                chainer.reporter.report({'loss': loss/it.batch_size,
                                          'precision': precision,
                                          'recall': recall,
                                          'f2': f2}, target)
