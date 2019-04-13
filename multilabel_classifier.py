@@ -180,19 +180,19 @@ class TrainChain(chainer.Chain):
             {'loss': loss}, self)
         return loss
 
-    def evaluate(self, x, t):
-        y = self.model(x)
-        loss = self.loss(y, t)
+    # def evaluate(self, x, t):
+    #     y = self.model(x)
+    #     loss = self.loss(y, t)
 
-        y = chainer.backends.cuda.to_cpu(F.sigmoid(y).array)
-        t = chainer.backends.cuda.to_cpu(t)
-        precision, recall, f2 = f2_score(y > 0.1, t)
-        # threshold, (precision, recall, f2) = find_optimal_threshold(
-        #     F.sigmoid(y), t)
-        chainer.reporter.report({'loss': loss,
-                                 'precision': precision,
-                                 'recall': recall,
-                                 'f2': f2}, self)
+    #     y = chainer.backends.cuda.to_cpu(F.sigmoid(y).array)
+    #     t = chainer.backends.cuda.to_cpu(t)
+    #     precision, recall, f2 = f2_score(y > 0.1, t)
+    #     # threshold, (precision, recall, f2) = find_optimal_threshold(
+    #     #     F.sigmoid(y), t)
+    #     chainer.reporter.report({'loss': loss,
+    #                              'precision': precision,
+    #                              'recall': recall,
+    #                              'f2': f2}, self)
 
     def freeze_extractor(self):
         self.model.freeze()
@@ -208,6 +208,39 @@ def find_threshold(model, test_iter, gpu, out):
     threshold, scores = find_optimal_threshold(pred, true)
     print('しきい値:{} で F2スコア{}'.format(threshold, scores))
     np.save(open(str(Path(out).joinpath('thresholds.npy')), 'wb'), threshold)
+
+
+class FScoreEvaluator(extensions.Evaluator):
+    def evaluate(self):
+        iterator = self._iterators['main']
+
+        if self.eval_hook:
+            self.eval_hook(self)
+
+        if hasattr(iterator, 'reset'):
+            iterator.reset()
+            it = iterator
+        else:
+            it = copy.copy(iterator)
+
+        summary = chainer.reporter.DictSummary()
+
+        observation = {}
+        target = self._targets['main']
+        with chainer.reporter.report_scope(observation):
+            with chainer.function.no_backprop_mode():
+                pred, true, loss = infer(
+                    it, target.model, self.device, target.loss_fn)
+                threshold, (precision, recall,
+                            f2) = find_optimal_threshold(pred, true)
+                chainer.reporter.report({'loss': loss,
+                                         'precision': precision,
+                                         'recall': recall,
+                                         'f2': f2}, target)
+
+        summary.add(observation)
+
+        return summary.compute_mean()
 
 
 def main(args=None):
@@ -292,8 +325,8 @@ def main(args=None):
         updater, (args.epoch, 'epoch'), out=args.out)
 
     # Evaluate the model with the test dataset for each epoch
-    trainer.extend(extensions.Evaluator(test_iter, model, device=args.gpu,
-                                        eval_func=model.evaluate))
+    trainer.extend(FScoreEvaluator(
+        test_iter, model, device=args.gpu))
 
     if args.optimizer == 'sgd':
         # Adamにweight decayはあんまりよくないらしい

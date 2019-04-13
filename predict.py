@@ -181,11 +181,12 @@ backbone_catalog = {
 }
 
 
-def infer(data_iter, model, gpu):
+def infer(data_iter, model, gpu, loss_fn=None):
     with chainer.using_config('train', False), chainer.using_config('enable_backprop', False):
         data_iter.reset()
         pred = []
         true = []
+        losses = []
         for batch in data_iter:
             batch = chainer.dataset.concat_examples(batch, device=gpu)
             if len(batch) == 2:
@@ -196,12 +197,17 @@ def infer(data_iter, model, gpu):
             y = model(x)
             if isinstance(y, tuple):
                 y = y[1]
-            y = F.sigmoid(y)
-            pred.append(chainer.backends.cuda.to_cpu(y.array))
+            pred.append(chainer.backends.cuda.to_cpu(F.sigmoid(y).array))
+            if loss_fn is not None:
+                losses.append(chainer.backends.cuda.to_cpu(
+                    loss_fn(y, t).array))
     pred = np.concatenate(pred)
     if len(true):
         true = np.concatenate(true)
-        return pred, true
+        if loss_fn is not None:
+            return pred, true, np.mean(losses)
+        else:
+            return pred, true
     else:
         return pred
 
