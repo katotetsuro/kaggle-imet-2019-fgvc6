@@ -195,12 +195,10 @@ class TrainChain(chainer.Chain):
                                  'f2': f2}, self)
 
     def freeze_extractor(self):
-        if self.model.res.update_enabled:
-            self.model.res.disable_update()
+        self.model.freeze()
 
     def unfreeze_extractor(self):
-        if not self.model.res.update_enabled:
-            self.model.res.enable_update()
+        self.model.unfreeze()
 
 
 def find_threshold(model, test_iter, gpu, out):
@@ -311,6 +309,9 @@ def main(args=None):
             print('最適な学習率を探します')
             trainer.extend(LRFinder(1e-7, 1, 5, optimizer,
                                     lr_key='alpha'), trigger=(1, 'iteration'))
+
+        trainer.extend(extensions.ExponentialShift('alpha', 0.2),
+                       trigger=triggers.EarlyStoppingTrigger(monitor='validation/main/loss'))
 
     # Take a snapshot of Trainer at each epoch
     trainer.extend(extensions.snapshot(

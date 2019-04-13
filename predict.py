@@ -101,6 +101,14 @@ class ResNet(chainer.Chain):
         h = self.fc2(h)
         return h
 
+    def freeze(self):
+        if self.res.update_enabled:
+            self.res.disable_update()
+
+    def unfreeze(self):
+        if not self.res.update_enabled:
+            self.res.enable_update()
+
 
 class SEResNet(chainer.Chain):
     def __init__(self):
@@ -143,7 +151,7 @@ class SEResNeXt(chainer.Chain):
 
 
 class DebugModel(chainer.Chain):
-    def __init__(self):
+    def __init__(self, dropout):
         print('using debug model')
         super().__init__()
         with self.init_scope():
@@ -157,6 +165,12 @@ class DebugModel(chainer.Chain):
         h = F.average_pooling_2d(h, ksize)
         h = self.fc(h)
         return h
+
+    def freeze(self):
+        pass
+
+    def unfreeze(self):
+        pass
 
 
 backbone_catalog = {
