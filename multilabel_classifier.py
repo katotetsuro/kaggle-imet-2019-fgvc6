@@ -134,7 +134,7 @@ def focal_loss(y_pred, y_true):
     pt = F.clip(pt, epsilon, 1-epsilon)
     CE = -F.log(pt)
     FL = (1-pt)**gamma * CE
-    loss = F.mean(F.sum(FL, axis=1))
+    loss = F.sum(FL, axis=1)
     return loss
 
 
@@ -146,7 +146,7 @@ class TrainChain(chainer.Chain):
 
         self.weight = weight
         if loss_fn == 'focal':
-            self.loss_fn = focal_loss
+            self.loss_fn = lambda x, t: F.sum(focal_loss(F.sigmoid(x), t))
         elif loss_fn == 'sigmoid':
             self.loss_fn = lambda x, t: F.sum(F.sigmoid_cross_entropy(
                 x, t, reduce='no'))
@@ -165,60 +165,82 @@ class TrainChain(chainer.Chain):
             z = F.sigmoid(z)
             two_stage = True
         else:
-            z = F.sigmoid(y)
+            #z = F.sigmoid(y)
             two_stage = False
-        first_stage_loss = self.loss_fn(F.sigmoid(y), t)
+        first_stage_loss = self.loss_fn(y, t)
         # xp = chainer.backends.cuda.get_array_module(t)
         # weights = xp.where(t == 0, 1, self.weight)
         # loss = F.mean(loss * weights)
-
-        # cooccurrenceが0なのに共起したものへlossをかける
-        xp = chainer.backend.cuda.get_array_module(z)
-        if xp == chainer.backends.cuda.cupy:
-            self.cooccurrence = chainer.backends.cuda.to_gpu(self.cooccurrence)
-        co = F.einsum('ij, ik->ijk', z, z)
-        bad_co = co * self.cooccurrence
-        bad_co_loss = F.mean(F.sum(bad_co, axis=0))
-
-        if two_stage:
-            return first_stage_loss, second_stage_loss, bad_co_loss
-        else:
-            return first_stage_loss, bad_co_loss
+        return first_stage_loss
 
     def forward(self, x, t):
         y = self.model(x)
-        losses = self.loss(y, t)
-        if len(losses) == 2:
-            chainer.reporter.report(
-                {'first_stage_loss': losses[0], 'cooccurrence': losses[1]}, self)
-            return losses[0] + self.co_coef * losses[-1]
-        else:
-            chainer.reporter.report(
-                {'first_stage_loss': losses[0], 'second_stage_loss': losses[1], 'cooccurrence': losses[2]}, self)
-            return losses[0] + losses[1] + self.co_coef * losses[-1]
+        loss = self.loss(y, t)
+        chainer.reporter.report(
+            {'loss': loss/len(t)}, self)
+        return loss
 
-    def evaluate(self, x, t):
-        y = self.model(x)
-        losses = self.loss(y, t)
-        if isinstance(y, tuple):
-            y = y[1]
-        y = F.sigmoid(y)
-        threshold, (precision, recall, f2) = find_optimal_threshold(y, t)
-        if len(losses) == 2:
-            chainer.reporter.report({'first_stage_loss': losses[0],
-                                     'cooccurrence': losses[-1],
-                                     'precision': precision,
-                                     'recall': recall,
-                                     'f2': f2,
-                                     'threshold': threshold}, self)
+    # def evaluate(self, x, t):
+    #     y = self.model(x)
+    #     loss = self.loss(y, t)
+
+    #     y = chainer.backends.cuda.to_cpu(F.sigmoid(y).array)
+    #     t = chainer.backends.cuda.to_cpu(t)
+    #     precision, recall, f2 = f2_score(y > 0.1, t)
+    #     # threshold, (precision, recall, f2) = find_optimal_threshold(
+    #     #     F.sigmoid(y), t)
+    #     chainer.reporter.report({'loss': loss,
+    #                              'precision': precision,
+    #                              'recall': recall,
+    #                              'f2': f2}, self)
+
+    def freeze_extractor(self):
+        self.model.freeze()
+
+    def unfreeze_extractor(self):
+        self.model.unfreeze()
+
+
+def find_threshold(model, test_iter, gpu, out):
+    if gpu >= 0:
+        model.to_gpu()
+    pred, true = infer(test_iter, model, gpu)
+    threshold, scores = find_optimal_threshold(pred, true)
+    print('しきい値:{} で F2スコア{}'.format(threshold, scores))
+    np.save(open(str(Path(out).joinpath('thresholds.npy')), 'wb'), threshold)
+
+
+class FScoreEvaluator(extensions.Evaluator):
+    def evaluate(self):
+        iterator = self._iterators['main']
+
+        if self.eval_hook:
+            self.eval_hook(self)
+
+        if hasattr(iterator, 'reset'):
+            iterator.reset()
+            it = iterator
         else:
-            chainer.reporter.report({'first_stage_loss': losses[0],
-                                     'second_stage_loss': losses[1],
-                                     'cooccurrence': losses[-1],
-                                     'precision': precision,
-                                     'recall': recall,
-                                     'f2': f2,
-                                     'threshold': threshold}, self)
+            it = copy.copy(iterator)
+
+        summary = chainer.reporter.DictSummary()
+
+        observation = {}
+        target = self._targets['main']
+        with chainer.reporter.report_scope(observation):
+            with chainer.function.no_backprop_mode():
+                pred, true, loss = infer(
+                    it, target.model, self.device, target.loss_fn)
+                threshold, (precision, recall,
+                            f2) = find_optimal_threshold(pred, true)
+                chainer.reporter.report({'loss': loss/it.batch_size,
+                                         'precision': precision,
+                                         'recall': recall,
+                                         'f2': f2}, target)
+
+        summary.add(observation)
+
+        return summary.compute_mean()
 
 
 def main(args=None):
@@ -245,20 +267,23 @@ def main(args=None):
     parser.add_argument('--size', type=int, default=224)
     parser.add_argument('--limit', type=int, default=None)
     parser.add_argument('--data-dir', type=str, default='data')
-    parser.add_argument('--hour', type=int, default=6)
     parser.add_argument('--lr-search', action='store_true')
     parser.add_argument('--pretrained', type=str, default='')
     parser.add_argument(
-        '--backbone', choices=['resnet', 'seresnext', 'debug_model'], default='resnet')
+        '--backbone', choices=['resnet', 'seresnet', 'seresnext', 'debug_model'], default='resnet')
     parser.add_argument('--co-coef', type=float, default=4)
     parser.add_argument('--two-step', action='store_true')
+    parser.add_argument('--log-interval', type=int, default=100)
+    parser.add_argument('--dropout', action='store_true')
+    parser.add_argument('--find-threshold', action='store_true')
+    parser.add_argument('--finetune', action='store_true')
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
 
     train, test, cooccurrence = get_dataset(
         args.data_dir, args.size, args.limit)
-    base_model = backbone_catalog[args.backbone](args.two_step)
+    base_model = backbone_catalog[args.backbone](args.dropout)
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
@@ -270,47 +295,42 @@ def main(args=None):
         model.to_gpu()
 
     if args.optimizer == 'adam':
-        optimizer = chainer.optimizers.Adam()
+        optimizer = chainer.optimizers.Adam(alpha=args.learnrate)
     elif args.optimizer == 'sgd':
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
     optimizer.setup(model)
-    # optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
 
-    train_iter = chainer.iterators.MultithreadIterator(
-        train, args.batchsize, n_threads=8)
+    if not args.finetune:
+        print('最初のエポックは特徴抽出層をfreezeします')
+        model.freeze_extractor()
+
+    train_iter = chainer.iterators.MultiprocessIterator(
+        train, args.batchsize, n_processes=8, n_prefetch=2)
     test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
                                                       repeat=False, shuffle=False)
 
-    class TimeupTrigger():
-        def __init__(self, epoch):
-            self.epoch = epoch
-
-        def __call__(self, trainer):
-            epoch = trainer.updater.epoch
-            if epoch > args.epoch:
-                return True
-            time = trainer.elapsed_time
-            if time > args.hour * 60 * 60:
-                print('時間切れで終了します。経過時間:{}'.format(time))
-                return True
-            return False
-
-        def get_training_length(self):
-            return self.epoch, 'epoch'
+    if args.find_threshold:
+        # train_iter, optimizerなど無駄なsetupもあるが。。
+        print('thresholdを探索して終了します')
+        chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
+        find_threshold(base_model, test_iter, args.gpu, args.out)
+        return
 
     # Set up a trainer
     updater = training.updaters.StandardUpdater(
         train_iter, optimizer, device=args.gpu,
         converter=lambda batch, device: chainer.dataset.concat_examples(batch, device=device))
     trainer = training.Trainer(
-        updater, TimeupTrigger(args.epoch), out=args.out)
+        updater, (args.epoch, 'epoch'), out=args.out)
 
     # Evaluate the model with the test dataset for each epoch
-    trainer.extend(extensions.Evaluator(test_iter, model, device=args.gpu,
-                                        eval_func=model.evaluate))
+    trainer.extend(FScoreEvaluator(
+        test_iter, model, device=args.gpu))
 
     if args.optimizer == 'sgd':
+        # Adamにweight decayはあんまりよくないらしい
+        optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
         trainer.extend(extensions.ExponentialShift(
             'lr', 0.5), trigger=(10, 'epoch'))
         if args.lr_search:
@@ -323,48 +343,50 @@ def main(args=None):
             trainer.extend(LRFinder(1e-7, 1, 5, optimizer,
                                     lr_key='alpha'), trigger=(1, 'iteration'))
 
+        trainer.extend(extensions.ExponentialShift('alpha', 0.2),
+                       trigger=triggers.EarlyStoppingTrigger(monitor='validation/main/loss'))
+
     # Take a snapshot of Trainer at each epoch
     trainer.extend(extensions.snapshot(
         filename='snaphot_epoch_{.updater.epoch}'), trigger=(10, 'epoch'))
 
-    # Take a snapshot of Model which has best F2 score.
+    # Take a snapshot of Model which has best val loss.
+    # Because searching best threshold for each evaluation takes too much time.
     trainer.extend(extensions.snapshot_object(
-        model.model, 'bestmodel'), trigger=triggers.MaxValueTrigger('validation/main/f2'))
+        model.model, 'bestmodel'), trigger=triggers.MinValueTrigger('validation/main/loss'))
     trainer.extend(extensions.snapshot_object(
         model.model, 'model_{.updater.epoch}'), trigger=(5, 'epoch'))
 
     # Write a log of evaluation statistics for each epoch
-    trainer.extend(extensions.LogReport(trigger=(100, 'iteration')))
+    trainer.extend(extensions.LogReport(
+        trigger=(args.log_interval, 'iteration')))
 
     trainer.extend(extensions.PrintReport(
-        ['epoch', 'lr', 'elapsed_time', 'main/first_stage_loss', 'main/second_stage_loss', 'main/cooccurrence', 'validation/main/first_stage_loss',
-         'validation/main/second_stage_loss', 'validation/main/cooccurrence', 'validation/main/precision',
+        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'validation/main/loss', 'validation/main/precision',
          'validation/main/recall', 'validation/main/f2', 'validation/main/threshold']))
 
-    trainer.extend(extensions.ProgressBar())
-    trainer.extend(extensions.observe_lr(), trigger=(100, 'iteration'))
+    trainer.extend(extensions.ProgressBar(update_interval=args.log_interval))
+    trainer.extend(extensions.observe_lr(), trigger=(
+        args.log_interval, 'iteration'))
     trainer.extend(CommandsExtension())
     save_args(args, args.out)
+
+    trainer.extend(lambda trainer: model.unfreeze_extractor(),
+                   trigger=(1, 'epoch'))
 
     if args.resume:
         # Resume from a snapshot
         chainer.serializers.load_npz(args.resume, trainer)
 
-    # Run the training
-    trainer.run()
-
     # save args with pickle for prediction time
     pickle.dump(args, open(str(Path(args.out).joinpath('args.pkl')), 'wb'))
 
+    # Run the training
+    trainer.run()
+
     # find optimal threshold
     chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
-    if args.gpu >= 0:
-        base_model.to_gpu()
-
-    pred, true = infer(test_iter, base_model, args.gpu)
-    threshold, scores = find_optimal_threshold(pred, true)
-    print('しきい値:{} で F2スコア{}'.format(threshold, scores))
-    np.save(open(str(Path(args.out).joinpath('thresholds.npy')), 'wb'), threshold)
+    find_threshold(base_model, test_iter, args.gpu, args.out)
 
 
 if __name__ == '__main__':
