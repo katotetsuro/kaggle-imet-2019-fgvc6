@@ -314,7 +314,14 @@ def main(args=None):
     if args.find_threshold:
         # train_iter, optimizerなど無駄なsetupもあるが。。
         print('thresholdを探索して終了します')
-        chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
+        chainer.serializers.load_npz(
+            join(args.out, 'bestmodel_loss'), base_model)
+        print('lossがもっとも小さかったモデルに対しての結果:')
+        find_threshold(base_model, test_iter, args.gpu, args.out)
+
+        chainer.serializers.load_npz(
+            join(args.out, 'bestmodel_f2'), base_model)
+        print('f2がもっとも大きかったモデルに対しての結果:')
         find_threshold(base_model, test_iter, args.gpu, args.out)
         return
 
@@ -354,7 +361,9 @@ def main(args=None):
     # Take a snapshot of Model which has best val loss.
     # Because searching best threshold for each evaluation takes too much time.
     trainer.extend(extensions.snapshot_object(
-        model.model, 'bestmodel'), trigger=triggers.MinValueTrigger('validation/main/loss'))
+        model.model, 'bestmodel_loss'), trigger=triggers.MinValueTrigger('validation/main/loss'))
+    trainer.extend(extensions.snapshot_object(
+        model.model, 'bestmodel_f2'), trigger=triggers.MaxValueTrigger('validation/main/f2'))
     trainer.extend(extensions.snapshot_object(
         model.model, 'model_{.updater.epoch}'), trigger=(5, 'epoch'))
 
@@ -386,7 +395,12 @@ def main(args=None):
     trainer.run()
 
     # find optimal threshold
-    chainer.serializers.load_npz(join(args.out, 'bestmodel'), base_model)
+    chainer.serializers.load_npz(join(args.out, 'bestmodel_loss'), base_model)
+    print('lossがもっとも小さかったモデルに対しての結果:')
+    find_threshold(base_model, test_iter, args.gpu, args.out)
+
+    chainer.serializers.load_npz(join(args.out, 'bestmodel_f2'), base_model)
+    print('f2がもっとも大きかったモデルに対しての結果:')
     find_threshold(base_model, test_iter, args.gpu, args.out)
 
 
