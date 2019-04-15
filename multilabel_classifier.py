@@ -295,7 +295,7 @@ def main(args=None):
         model.to_gpu()
 
     if args.optimizer == 'adam':
-        optimizer = chainer.optimizers.Adam(alpha=1e-4)
+        optimizer = chainer.optimizers.Adam(alpha=args.learnrate)
     elif args.optimizer == 'sgd':
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 

@@ -242,7 +242,7 @@ def main(_args=None):
     image_files = glob(join(args.data_dir, 'test/*.png'))
     test = ImageDataset(image_files)
     test = chainer.datasets.TransformDataset(
-        test, ImgaugTransformer(args.size, launch_args.tta > 1))
+        test, ImgaugTransformer(args.size, False))
     test_iter = chainer.iterators.MultiprocessIterator(
         test, args.batchsize, repeat=False, shuffle=False, n_processes=8, n_prefetch=2)
 
@@ -253,7 +253,7 @@ def main(_args=None):
         preds.append(pred)
 
     pred = np.mean(preds, axis=0)
-    indexes = np.argsort(pred, axis=1)[:, ::-1][:, :15]
+    indexes = np.argsort(pred, axis=1)[:, ::-1][:, :10]
     attributes = []
     for i, p in zip(indexes, pred):
         attr = i[p[i] > best_threshold]
