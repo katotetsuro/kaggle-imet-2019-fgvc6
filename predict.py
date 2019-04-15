@@ -278,6 +278,8 @@ def main(_args=None):
     attributes = []
     for i, p in zip(indexes, pred):
         attr = i[p[i] > best_threshold]
+        if len(attr) == 0:
+            attr = [i[0]]
         attr = map(str, attr)
         attributes.append(' '.join(attr))
 
