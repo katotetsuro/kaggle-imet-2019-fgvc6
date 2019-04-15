@@ -148,7 +148,7 @@ def cooccurrence_loss(y_pred, y_true, mask):
     pt = (1 - co) * (1 - y_true)
     pt = F.clip(pt, epsilon, 1-epsilon)
     CE = -F.log(pt) * mask
-    loss = F.sum(CE)
+    loss = F.sum(F.mean(CE, axis=0))
     return loss
 
 
