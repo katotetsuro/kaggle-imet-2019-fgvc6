@@ -111,43 +111,62 @@ class ResNet(chainer.Chain):
 
 
 class SEResNet(chainer.Chain):
-    def __init__(self):
+    def __init__(self, dropout):
         super().__init__()
         with self.init_scope():
             self.res = SEResNet50(
                 pretrained_model=None if ON_KAGGLE else 'imagenet')
             self.res.pick = 'pool5'
-            self.fc = chainer.links.Linear(
-                None, num_attributes, initialW=chainer.initializers.uniform.Uniform(sqrt(1/2048)))
+            self.fc1 = chainer.links.Linear(None, 1024)
+            self.fc2 = chainer.links.Linear(None, num_attributes)
+        self.dropout = dropout
 
-    @chainer.static_graph
     def forward(self, x):
         h = self.res(x)
-        h = self.fc(h)
+        h = self.fc1(h)
+        if self.dropout:
+            h = F.dropout(h)
+        h = self.fc2(h)
         return h
+
+    def freeze(self):
+        if self.res.update_enabled:
+            self.res.disable_update()
+
+    def unfreeze(self):
+        if not self.res.update_enabled:
+            self.res.enable_update()
 
 
 class SEResNeXt(chainer.Chain):
     """ResNetクラスとほとんどかわらないんだけど、SEResNextはstatic_graphにできないっぽい？
     """
 
-    def __init__(self):
+    def __init__(self, dropout):
         super().__init__()
         with self.init_scope():
             self.res = SEResNeXt50(
                 pretrained_model=None if ON_KAGGLE else 'imagenet')
             self.res.pick = 'pool5'
-            self.fc1 = chainer.links.Linear(None, 512)
+            self.fc1 = chainer.links.Linear(None, 1024)
             self.fc2 = chainer.links.Linear(None, num_attributes)
+        self.dropout = dropout
 
     def forward(self, x):
         h = self.res(x)
         h = self.fc1(h)
-        # ここにh.unchainを入れる方が最初のエポックはめちゃくちゃ早くなる
-        h = F.relu(h)
-        h = F.dropout(h)
+        if self.dropout:
+            h = F.dropout(h)
         h = self.fc2(h)
         return h
+
+    def freeze(self):
+        if self.res.update_enabled:
+            self.res.disable_update()
+
+    def unfreeze(self):
+        if not self.res.update_enabled:
+            self.res.enable_update()
 
 
 class DebugModel(chainer.Chain):
