@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from adam import Adam
 from lr_finder import LRFinder
 from predict import ImgaugTransformer, ResNet, DebugModel, infer, num_attributes, backbone_catalog
 
@@ -138,6 +139,19 @@ def focal_loss(y_pred, y_true):
     return loss
 
 
+def cooccurrence_loss(y_pred, y_true, mask):
+    """学習データで共起してないところにロスをかける
+    """
+    epsilon = 1e-5
+    y_pred = F.sigmoid(y_pred)
+    co = F.einsum('ij, ik->ijk', y_pred, y_pred)
+    pt = (1 - co) * (1 - y_true)
+    pt = F.clip(pt, epsilon, 1-epsilon)
+    CE = -F.log(pt) * mask
+    loss = F.sum(CE)
+    return loss
+
+
 class TrainChain(chainer.Chain):
     def __init__(self, model, weight, loss_fn, cooccurrence, co_coef):
         super().__init__()
@@ -153,46 +167,32 @@ class TrainChain(chainer.Chain):
         else:
             raise ValueError('unknown loss function. {}'.format(loss_fn))
 
-        self.cooccurrence = (cooccurrence == 0).astype(np.float32)
-        # 対角成分はlossをかけない
-        self.cooccurrence -= np.eye(self.cooccurrence.shape[0])
+        self.cooccurrence = cooccurrence.astype(np.int32)
+        # 対角成分と共起している組み合わせにはlossをかけない
+        self.co_ignore_mask = self.cooccurrence
+        self.co_ignore_mask[np.arange(
+            num_attributes), np.arange(num_attributes)] = 1
+        self.co_ignore_mask[cooccurrence > 0] = 1
+        self.co_ignore_mask = 1 - self.co_ignore_mask
         self.co_coef = co_coef
 
     def loss(self, y, t):
-        if isinstance(y, tuple):
-            y, z = y
-            second_stage_loss = self.loss_fn(z, t)
-            z = F.sigmoid(z)
-            two_stage = True
-        else:
-            #z = F.sigmoid(y)
-            two_stage = False
-        first_stage_loss = self.loss_fn(y, t)
-        # xp = chainer.backends.cuda.get_array_module(t)
-        # weights = xp.where(t == 0, 1, self.weight)
-        # loss = F.mean(loss * weights)
-        return first_stage_loss
+        attribute_wise_loss = self.loss_fn(y, t)
+
+        # loss based on bad cooccurrence
+        xp = chainer.backend.cuda.get_array_module(y)
+        if xp == chainer.backends.cuda.cupy:
+            self.cooccurrence = chainer.backends.cuda.to_gpu(self.cooccurrence)
+        co_loss = cooccurrence_loss(y, self.cooccurrence, self.co_ignore_mask)
+        return attribute_wise_loss, co_loss
 
     def forward(self, x, t):
         y = self.model(x)
-        loss = self.loss(y, t)
+        loss, co_loss = self.loss(y, t)
         chainer.reporter.report(
-            {'loss': loss/len(t)}, self)
-        return loss
-
-    # def evaluate(self, x, t):
-    #     y = self.model(x)
-    #     loss = self.loss(y, t)
-
-    #     y = chainer.backends.cuda.to_cpu(F.sigmoid(y).array)
-    #     t = chainer.backends.cuda.to_cpu(t)
-    #     precision, recall, f2 = f2_score(y > 0.1, t)
-    #     # threshold, (precision, recall, f2) = find_optimal_threshold(
-    #     #     F.sigmoid(y), t)
-    #     chainer.reporter.report({'loss': loss,
-    #                              'precision': precision,
-    #                              'recall': recall,
-    #                              'f2': f2}, self)
+            {'loss': loss/len(t),
+             'co_loss': co_loss/len(t)}, self)
+        return loss + self.co_coef * co_loss
 
     def freeze_extractor(self):
         self.model.freeze()
@@ -229,11 +229,12 @@ class FScoreEvaluator(extensions.Evaluator):
         target = self._targets['main']
         with chainer.reporter.report_scope(observation):
             with chainer.function.no_backprop_mode():
-                pred, true, loss = infer(
-                    it, target.model, self.device, target.loss_fn)
+                pred, true, loss, co_loss = infer(
+                    it, target.model, self.device, target.loss)
                 threshold, (precision, recall,
                             f2) = find_optimal_threshold(pred, true)
                 chainer.reporter.report({'loss': loss/it.batch_size,
+                                         'co_loss': co_loss/it.batch_size,
                                          'precision': precision,
                                          'recall': recall,
                                          'f2': f2}, target)
@@ -295,7 +296,7 @@ def main(args=None):
         model.to_gpu()
 
     if args.optimizer == 'adam':
-        optimizer = chainer.optimizers.Adam(alpha=args.learnrate)
+        optimizer = Adam(alpha=args.learnrate, adabound=True, final_lr=1e-4)
     elif args.optimizer == 'sgd':
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
@@ -362,7 +363,7 @@ def main(args=None):
         trigger=(args.log_interval, 'iteration')))
 
     trainer.extend(extensions.PrintReport(
-        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'validation/main/loss', 'validation/main/precision',
+        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'main/co_loss', 'validation/main/loss', 'validation/main/co_loss', 'validation/main/precision',
          'validation/main/recall', 'validation/main/f2', 'validation/main/threshold']))
 
     trainer.extend(extensions.ProgressBar(update_interval=args.log_interval))

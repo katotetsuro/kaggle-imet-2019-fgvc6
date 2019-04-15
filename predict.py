@@ -206,6 +206,7 @@ def infer(data_iter, model, gpu, loss_fn=None):
         pred = []
         true = []
         losses = []
+        co_losses = []
         for batch in data_iter:
             batch = chainer.dataset.concat_examples(batch, device=gpu)
             if len(batch) == 2:
@@ -218,13 +219,14 @@ def infer(data_iter, model, gpu, loss_fn=None):
                 y = y[1]
             pred.append(chainer.backends.cuda.to_cpu(F.sigmoid(y).array))
             if loss_fn is not None:
-                losses.append(chainer.backends.cuda.to_cpu(
-                    loss_fn(y, t).array))
+                loss = loss_fn(y, t)
+                losses.append(chainer.backends.cuda.to_cpu(loss[0].array))
+                co_losses.append(chainer.backends.cuda.to_cpu(loss[1].array))
     pred = np.concatenate(pred)
     if len(true):
         true = np.concatenate(true)
         if loss_fn is not None:
-            return pred, true, np.mean(losses)
+            return pred, true, np.mean(losses), np.mean(co_losses)
         else:
             return pred, true
     else:
