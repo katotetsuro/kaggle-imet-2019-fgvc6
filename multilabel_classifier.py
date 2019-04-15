@@ -183,6 +183,8 @@ class TrainChain(chainer.Chain):
         xp = chainer.backend.cuda.get_array_module(y)
         if xp == chainer.backends.cuda.cupy:
             self.cooccurrence = chainer.backends.cuda.to_gpu(self.cooccurrence)
+            self.co_ignore_mask = chainer.backends.cuda.to_gpu(
+                self.co_ignore_mask)
         co_loss = cooccurrence_loss(y, self.cooccurrence, self.co_ignore_mask)
         return attribute_wise_loss, co_loss
 
@@ -297,7 +299,7 @@ def main(args=None):
 
     if args.optimizer == 'adam':
         optimizer = Adam(alpha=args.learnrate, adabound=True,
-                         final_lr=1e-7, weight_decay_rate=5e-4)
+                         final_lr=1e-7, weight_decay_rate=5e-4, eta=2)
     elif args.optimizer == 'sgd':
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
