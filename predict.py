@@ -192,11 +192,44 @@ class DebugModel(chainer.Chain):
         pass
 
 
+class CoResNet(chainer.Chain):
+    def __init__(self, dropout):
+        super().__init__()
+        with self.init_scope():
+            self.res = ResNet50(
+                pretrained_model=None if ON_KAGGLE else 'imagenet')
+            self.res.pick = 'pool5'
+            self.fc = chainer.links.Linear(None, num_attributes)
+            self.conv = chainer.links.Convolution1D(
+                in_channels=num_attributes, out_channels=num_attributes, ksize=num_attributes)
+        self.dropout = dropout
+
+    @chainer.static_graph
+    def forward(self, x):
+        h = self.res(x)
+        if self.dropout:
+            h = F.dropout(h)
+        h = self.fc(h)
+        h = F.einsum('ij, ik->ijk', h, h)
+        h = self.conv(h)
+
+        return h[..., 0]
+
+    def freeze(self):
+        if self.res.update_enabled:
+            self.res.disable_update()
+
+    def unfreeze(self):
+        if not self.res.update_enabled:
+            self.res.enable_update()
+
+
 backbone_catalog = {
     'debug_model': DebugModel,
     'resnet': ResNet,
     'seresnet': SEResNet,
-    'seresnext': SEResNeXt
+    'seresnext': SEResNeXt,
+    'co_resnet': CoResNet
 }
 
 

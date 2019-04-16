@@ -4,7 +4,7 @@
 *.ipynb
 __pycache__
 result
-submission.csv
 memo.md
 pretrained
 *.dill
+*.csv
