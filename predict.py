@@ -53,12 +53,14 @@ class ImgaugTransformer(chainer.datasets.TransformDataset):
         self.seq = iaa.Sequential([iaa.OneOf([
             iaa.CropToFixedSize(size, size),
             iaa.Resize((size, size))
-        ]),  # end of OneOf
+        ], random_state=63),  # end of OneOf
             iaa.Fliplr(0.5),
             iaa.PerspectiveTransform(0.01)])
 
         if train:
             self.seq.append(iaa.CoarseSaltAndPepper(0.2, size_percent=0.01))
+
+        #self.seq = self.seq.to_deterministic()
 
         self.mean = np.array([123.15163084, 115.90288257, 103.0626238],
                              dtype=np.float32).reshape(3, 1, 1)
@@ -200,8 +202,8 @@ class CoResNet(chainer.Chain):
                 pretrained_model=None if ON_KAGGLE else 'imagenet')
             self.res.pick = 'pool5'
             self.fc = chainer.links.Linear(None, num_attributes)
-            self.conv = chainer.links.Convolution1D(
-                in_channels=num_attributes, out_channels=num_attributes, ksize=num_attributes)
+            self.conv = chainer.links.Convolution2D(
+                in_channels=1, out_channels=1, ksize=(num_attributes, 1))
         self.dropout = dropout
 
     @chainer.static_graph
@@ -211,9 +213,9 @@ class CoResNet(chainer.Chain):
             h = F.dropout(h)
         h = self.fc(h)
         h = F.einsum('ij, ik->ijk', h, h)
-        h = self.conv(h)
-
-        return h[..., 0]
+        h = self.conv(h[:, None, :, :])
+        h = h[:, 0, 0, :]
+        return h
 
     def freeze(self):
         if self.res.update_enabled:

@@ -251,7 +251,21 @@ class FScoreEvaluator(extensions.Evaluator):
         return summary.compute_mean()
 
 
+def set_random_seed(seed):
+    """copyright https://qiita.com/TokyoMickey/items/cc8cd43545f2656b1cbd
+    """
+    # set Python random seed
+    random.seed(seed)
+
+    # set NumPy random seed
+    np.random.seed(seed)
+
+    # set Chainer(CuPy) random seed
+    # cp.random.seed(seed)
+
+
 def main(args=None):
+    set_random_seed(63)
     chainer.global_config.autotune = True
     chainer.cuda.set_max_workspace_size(512*1024*1024)
     parser = argparse.ArgumentParser()
@@ -271,7 +285,8 @@ def main(args=None):
                         '-w', type=float, default=1)
     parser.add_argument('--loss-function',
                         choices=['focal', 'sigmoid'], default='focal')
-    parser.add_argument('--optimizer', choices=['sgd', 'adam'], default='adam')
+    parser.add_argument(
+        '--optimizer', choices=['sgd', 'adam', 'adabound'], default='adam')
     parser.add_argument('--size', type=int, default=224)
     parser.add_argument('--limit', type=int, default=None)
     parser.add_argument('--data-dir', type=str, default='data')
@@ -303,8 +318,9 @@ def main(args=None):
         model.to_gpu()
 
     if args.optimizer == 'adam':
-        optimizer = Adam(alpha=args.learnrate, adabound=True,
-                         final_lr=1e-7, weight_decay_rate=5e-4, eta=1)
+        optimizer = Adam(alpha=args.learnrate)
+    elif args.optimizer == 'adabound':
+        optimizer = Adam(alpha=args.learnrate, adabound=True)
     elif args.optimizer == 'sgd':
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
