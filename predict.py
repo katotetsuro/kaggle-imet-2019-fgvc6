@@ -27,6 +27,7 @@ except ImportError:
         open('../input/model-definitions/resnet50_def.dill', 'rb'))
 
 num_attributes = 1103
+num_culture = 398
 
 # copyright https://github.com/lopuhin/kaggle-imet-2019/blob/master/imet/utils.py
 import os
@@ -268,11 +269,33 @@ def infer(data_iter, model, gpu, loss_fn=None):
         return pred
 
 
+def make_prediction(y, th1, th2, max_culture, max_tag):
+    cultures = y[:, :num_culture]
+    tags = y[:, num_culture:]
+
+    prediction = np.zeros(y.shape, dtype=np.bool)
+    r = np.arange(len(y))[:, None]
+    # cultureは 0 ~ 2個選ぶ. 0個でもいいので普通にactivateしているかどうかでみる
+    indexes = np.argsort(cultures, axis=1)[:, ::-1][:, :max_culture]
+    activated_all = cultures > th1
+    activated = activated_all[r, indexes]
+    prediction[r, indexes] = activated
+
+    # todo: もし何もactivateしなくても、最大スコアのものをつける??
+    indexes = np.argsort(tags, axis=1)[:, ::-1][:, :max_tag]
+    activated_all = tags > th2
+    activated = activated_all[r, indexes]
+    prediction[r, indexes + num_culture] = activated
+
+    return prediction
+
+
 def main(_args=None):
     parser = ArgumentParser()
     parser.add_argument('dir', type=str)
     parser.add_argument('tta', type=int, default=4)
     parser.add_argument('threshold', type=float, default=0.28)
+    parser.add_argument('--limit', type=int, default=None)
     launch_args = parser.parse_args() if _args is None else parser.parse_args(
         _args)
     pretrained_model_dir = launch_args.dir
@@ -296,6 +319,8 @@ def main(_args=None):
 
     best_threshold = launch_args.threshold
     image_files = glob(join(args.data_dir, 'test/*.png'))
+    if args.limit:
+        image_files = list(image_files)[:args.limit]
     test = ImageDataset(image_files)
     test = chainer.datasets.TransformDataset(
         test, ImgaugTransformer(args.size, False))
@@ -309,12 +334,11 @@ def main(_args=None):
         preds.append(pred)
 
     pred = np.mean(preds, axis=0)
-    indexes = np.argsort(pred, axis=1)[:, ::-1][:, :10]
+    pred = make_prediction(pred, 0.24, 0.28, 4, 9)
+
     attributes = []
-    for i, p in zip(indexes, pred):
-        attr = i[p[i] > best_threshold]
-        if len(attr) == 0:
-            attr = [i[0]]
+    for p in pred:
+        attr = np.where(p)[0]
         attr = map(str, attr)
         attributes.append(' '.join(attr))
 
