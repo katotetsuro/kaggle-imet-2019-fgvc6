@@ -74,7 +74,7 @@ class C2AETrainChain(chainer.Chain):
 
         loss = sums / (5*normalizers)
         loss = F.clip(loss, -1e+6, 1e+6)
-        loss = F.mean(loss)
+        loss = F.sum(loss)
         return loss
 
     def loss(self, encoded_x, decoded_x, t):
