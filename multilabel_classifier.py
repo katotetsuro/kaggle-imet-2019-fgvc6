@@ -23,7 +23,8 @@ from tqdm import tqdm
 
 from adam import Adam
 from lr_finder import LRFinder
-from predict import ImgaugTransformer, ResNet, DebugModel, infer, num_attributes, backbone_catalog
+from predict import ImgaugTransformer, ResNet, DebugModel, infer, num_attributes, backbone_catalog, C2AE
+from c2ae import C2AETrainChain
 
 
 class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
@@ -152,62 +153,6 @@ def cooccurrence_loss(y_pred, y_true, mask):
     return loss
 
 
-class TrainChain(chainer.Chain):
-    def __init__(self, model, weight, loss_fn, cooccurrence, co_coef):
-        super().__init__()
-        with self.init_scope():
-            self.model = model
-
-        self.weight = weight
-        if loss_fn == 'focal':
-            self.loss_fn = lambda x, t: F.sum(focal_loss(F.sigmoid(x), t))
-        elif loss_fn == 'sigmoid':
-            self.loss_fn = lambda x, t: F.sum(F.sigmoid_cross_entropy(
-                x, t, reduce='no'))
-        else:
-            raise ValueError('unknown loss function. {}'.format(loss_fn))
-
-        self.cooccurrence = cooccurrence.astype(np.int32)
-        # 対角成分と共起している組み合わせにはlossをかけない
-        self.co_ignore_mask = self.cooccurrence
-        self.co_ignore_mask[np.arange(
-            num_attributes), np.arange(num_attributes)] = 1
-        self.co_ignore_mask[cooccurrence > 0] = 1
-        self.co_ignore_mask = 1 - self.co_ignore_mask
-        self.co_coef = co_coef
-
-    def loss(self, y, t):
-        attribute_wise_loss = self.loss_fn(y, t)
-
-        # loss based on bad cooccurrence
-        xp = chainer.backend.cuda.get_array_module(y)
-        if self.co_coef == 0:
-            co_loss = F.sum(xp.zeros(1, dtype=np.float32))
-        else:
-            if xp == chainer.backends.cuda.cupy:
-                self.cooccurrence = chainer.backends.cuda.to_gpu(
-                    self.cooccurrence)
-                self.co_ignore_mask = chainer.backends.cuda.to_gpu(
-                    self.co_ignore_mask)
-            co_loss = cooccurrence_loss(
-                y, self.cooccurrence, self.co_ignore_mask)
-        return attribute_wise_loss, co_loss
-
-    def forward(self, x, t):
-        y = self.model(x)
-        loss, co_loss = self.loss(y, t)
-        chainer.reporter.report(
-            {'loss': loss/len(t),
-             'co_loss': co_loss/len(t)}, self)
-        return loss + self.co_coef * co_loss
-
-    def freeze_extractor(self):
-        self.model.freeze()
-
-    def unfreeze_extractor(self):
-        self.model.unfreeze()
-
-
 def find_threshold(model, test_iter, gpu, out):
     if gpu >= 0:
         model.to_gpu()
@@ -236,12 +181,13 @@ class FScoreEvaluator(extensions.Evaluator):
         target = self._targets['main']
         with chainer.reporter.report_scope(observation):
             with chainer.function.no_backprop_mode():
-                pred, true, loss, co_loss = infer(
+                pred, true, embed_loss, output_loss = infer(
                     it, target.model, self.device, target.loss)
                 threshold, (precision, recall,
                             f2) = find_optimal_threshold(pred, true)
-                chainer.reporter.report({'loss': loss/it.batch_size,
-                                         'co_loss': co_loss/it.batch_size,
+                chainer.reporter.report({'embed_loss': embed_loss,
+                                         'output_loss': output_loss,
+                                         'loss': embed_loss+output_loss,
                                          'precision': precision,
                                          'recall': recall,
                                          'f2': f2}, target)
@@ -306,13 +252,12 @@ def main(args=None):
 
     train, test, cooccurrence = get_dataset(
         args.data_dir, args.size, args.limit)
-    base_model = backbone_catalog[args.backbone](args.dropout)
+    base_model = C2AE(512)
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
         chainer.serializers.load_npz(args.pretrained, base_model, strict=False)
-    model = TrainChain(base_model, args.weight_positive_sample,
-                       loss_fn=args.loss_function, cooccurrence=cooccurrence, co_coef=args.co_coef)
+    model = C2AETrainChain(base_model)
     if args.gpu >= 0:
         chainer.backends.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
@@ -396,7 +341,7 @@ def main(args=None):
         trigger=(args.log_interval, 'iteration')))
 
     trainer.extend(extensions.PrintReport(
-        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'main/co_loss', 'validation/main/loss', 'validation/main/co_loss', 'validation/main/precision',
+        ['epoch', 'lr', 'elapsed_time', 'main/embed_loss', 'main/output_loss', 'validation/main/embed_loss', 'validation/main/output_loss', 'validation/main/precision',
          'validation/main/recall', 'validation/main/f2', 'validation/main/threshold']))
 
     trainer.extend(extensions.ProgressBar(update_interval=args.log_interval))
@@ -416,6 +361,7 @@ def main(args=None):
     pickle.dump(args, open(str(Path(args.out).joinpath('args.pkl')), 'wb'))
 
     # Run the training
+
     trainer.run()
 
     # find optimal threshold

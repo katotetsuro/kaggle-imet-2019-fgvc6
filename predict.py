@@ -195,27 +195,45 @@ class DebugModel(chainer.Chain):
         pass
 
 
-class CoResNet(chainer.Chain):
-    def __init__(self, dropout):
+class C2AE(chainer.Chain):
+    def __init__(self, latent_dim):
         super().__init__()
         with self.init_scope():
             self.res = ResNet50(
                 pretrained_model=None if ON_KAGGLE else 'imagenet')
             self.res.pick = 'pool5'
-            self.fc = chainer.links.Linear(None, num_attributes)
-            self.conv = chainer.links.Convolution2D(
-                in_channels=1, out_channels=1, ksize=(num_attributes, 1))
-        self.dropout = dropout
+            fc = chainer.links.Linear(None, 512)
+            self.fx = chainer.Sequential(
+                self.res, fc, lambda x: F.sigmoid(x)-0.5)
 
-    @chainer.static_graph
+            self.fd = chainer.Sequential(
+                chainer.links.Linear(None, 512),
+                chainer.functions.leaky_relu,
+                chainer.functions.dropout,
+                chainer.links.Linear(None, num_attributes),
+                chainer.functions.sigmoid
+            )
+
+            # ラベルのエンコーダは推論時に不要なのでTrainChainに含めるべきかもしれないけど、
+            # 重みの復元&fine tuningを考えるとこっちに持っていた方がコードが完結になるか
+            self.fe = chainer.Sequential(
+                chainer.links.Linear(None, 512),
+                chainer.functions.leaky_relu,
+                chainer.functions.dropout,
+                chainer.links.Linear(None, 512),
+                lambda x: chainer.functions.sigmoid(x) - 0.5
+            )
+
     def forward(self, x):
-        h = self.res(x)
-        if self.dropout:
-            h = F.dropout(h)
-        h = self.fc(h)
-        h = F.einsum('ij, ik->ijk', h, h)
-        h = self.conv(h[:, None, :, :])
-        h = h[:, 0, 0, :]
+        e = self.fx(x)
+        h = self.fd(e)
+        return e, h
+
+    def encode_label(self, y):
+        return self.fe(y)
+
+    def decode(self, x):
+        h = self.fd(x)
         return h
 
     def freeze(self):
@@ -231,8 +249,7 @@ backbone_catalog = {
     'debug_model': DebugModel,
     'resnet': ResNet,
     'seresnet': SEResNet,
-    'seresnext': SEResNeXt,
-    'co_resnet': CoResNet
+    'seresnext': SEResNeXt
 }
 
 
@@ -241,8 +258,8 @@ def infer(data_iter, model, gpu, loss_fn=None):
         data_iter.reset()
         pred = []
         true = []
-        losses = []
-        co_losses = []
+        embed_losses = []
+        output_losses = []
         for batch in data_iter:
             batch = chainer.dataset.concat_examples(batch, device=gpu)
             if len(batch) == 2:
@@ -250,19 +267,20 @@ def infer(data_iter, model, gpu, loss_fn=None):
                 true.append(chainer.backends.cuda.to_cpu(t))
             else:
                 x, = batch
-            y = model(x)
-            if isinstance(y, tuple):
-                y = y[1]
-            pred.append(chainer.backends.cuda.to_cpu(F.sigmoid(y).array))
+
+            y_e, y_l = model(x)
+            pred.append(chainer.backends.cuda.to_cpu(y_l.array))
             if loss_fn is not None:
-                loss = loss_fn(y, t)
-                losses.append(chainer.backends.cuda.to_cpu(loss[0].array))
-                co_losses.append(chainer.backends.cuda.to_cpu(loss[1].array))
+                loss = loss_fn(y_e, y_l, t)
+                embed_losses.append(
+                    chainer.backends.cuda.to_cpu(loss[0].array))
+                output_losses.append(
+                    chainer.backends.cuda.to_cpu(loss[1].array))
     pred = np.concatenate(pred)
     if len(true):
         true = np.concatenate(true)
         if loss_fn is not None:
-            return pred, true, np.mean(losses), np.mean(co_losses)
+            return pred, true, np.mean(embed_losses), np.mean(output_losses)
         else:
             return pred, true
     else:
