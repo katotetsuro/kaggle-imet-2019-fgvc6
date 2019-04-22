@@ -263,9 +263,10 @@ def main(args=None):
         model.to_gpu()
 
     if args.optimizer == 'adam':
-        optimizer = Adam(alpha=args.learnrate)
+        optimizer = Adam(alpha=args.learnrate, weight_decay_rate=1e-5)
     elif args.optimizer == 'adabound':
-        optimizer = Adam(alpha=args.learnrate, adabound=True)
+        optimizer = Adam(alpha=args.learnrate, adabound=True,
+                         weight_decay_rate=1e-5, gamma=5e-7)
     elif args.optimizer == 'sgd':
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
@@ -314,7 +315,7 @@ def main(args=None):
             print('最適な学習率を探します')
             trainer.extend(LRFinder(1e-7, 1, 5, optimizer),
                            trigger=(1, 'iteration'))
-    elif args.optimizer == 'adam':
+    elif args.optimizer in ['adam', 'adabound']:
         if args.lr_search:
             print('最適な学習率を探します')
             trainer.extend(LRFinder(1e-7, 1, 5, optimizer,

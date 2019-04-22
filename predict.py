@@ -202,7 +202,7 @@ class C2AE(chainer.Chain):
             self.res = ResNet50(
                 pretrained_model=None if ON_KAGGLE else 'imagenet')
             self.res.pick = 'pool5'
-            fc = chainer.links.Linear(None, 512)
+            fc = chainer.links.Linear(None, 128)
             self.fx = chainer.Sequential(
                 self.res, fc, lambda x: F.sigmoid(x)-0.5)
 
@@ -220,7 +220,7 @@ class C2AE(chainer.Chain):
                 chainer.links.Linear(None, 512),
                 chainer.functions.leaky_relu,
                 chainer.functions.dropout,
-                chainer.links.Linear(None, 512),
+                chainer.links.Linear(None, 128),
                 lambda x: chainer.functions.sigmoid(x) - 0.5
             )
 

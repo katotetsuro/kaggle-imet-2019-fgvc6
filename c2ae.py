@@ -21,22 +21,23 @@ class C2AETrainChain(chainer.Chain):
         return a[:, :, None] - b[:, None, :]
 
     def embedding_loss(self, x, e):
-        x = x[:, :, None]
-        e = e[:, :, None]
         xp = chainer.backends.cuda.get_array_module(x)
-        I = xp.eye(x.shape[1])[None, ...]
-        C1 = (x - e)
-        C1 = F.matmul(C1, C1, transb=True)
+        I = xp.eye(x.shape[1])
+        C1 = (x - e)  # shape (batchsize, embedding_dim)
+        C1 = F.matmul(C1, C1, transb=True)  # (embedding_dim, embedding_dim)
 
         def trace(x):
-            return F.sum(F.diagonal(x, axis1=1, axis2=2), axis=1)
+            return F.sum(F.diagonal(x))
+
         C1 = trace(C1)
-        C2 = F.matmul(x, x, transb=True) - I
+
+        C2 = F.matmul(x, x, transa=True) - I
         C2 = F.matmul(C2, C2, transb=True)
-        C3 = F.matmul(e, e, transb=True) - I
+
+        C3 = F.matmul(e, e, transa=True) - I
         C3 = F.matmul(C3, C3, transb=True)
         loss = C1 + 0.5 * trace(C2 + C3)
-        return F.mean(loss)
+        return loss
 
     def output_loss(self, predictions, labels):
         """Computational error function,k属于Y，l属于Y补，计算ck - cl值，此时误差是对称的
