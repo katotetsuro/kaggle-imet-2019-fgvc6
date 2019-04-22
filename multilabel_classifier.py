@@ -252,7 +252,7 @@ def main(args=None):
 
     train, test, cooccurrence = get_dataset(
         args.data_dir, args.size, args.limit)
-    base_model = C2AE(512)
+    base_model = C2AE(512, 256)
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))

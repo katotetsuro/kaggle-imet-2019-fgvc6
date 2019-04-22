@@ -8,6 +8,7 @@ from math import sqrt
 from PIL import Image
 import chainer
 import chainer.functions as F
+import chainer.links as L
 from imgaug import augmenters as iaa
 import pandas as pd
 import numpy as np
@@ -196,32 +197,36 @@ class DebugModel(chainer.Chain):
 
 
 class C2AE(chainer.Chain):
-    def __init__(self, latent_dim):
+    def __init__(self, latent_dim, embed_dim):
         super().__init__()
         with self.init_scope():
             self.res = ResNet50(
                 pretrained_model=None if ON_KAGGLE else 'imagenet')
             self.res.pick = 'pool5'
-            fc = chainer.links.Linear(None, 128)
+            fc = chainer.links.Linear(None, embed_dim)
             self.fx = chainer.Sequential(
-                self.res, fc, lambda x: F.sigmoid(x)-0.5)
+                self.res,
+                F.dropout,
+                fc,
+                lambda x: F.sigmoid(x)-0.5)
+
+            def fc_activ_dropout(x, dim):
+                return F.dropout(F.leaky_relu(L.Linear(None, dim)(x)))
 
             self.fd = chainer.Sequential(
-                chainer.links.Linear(None, 512),
-                chainer.functions.leaky_relu,
-                chainer.functions.dropout,
-                chainer.links.Linear(None, num_attributes),
+                lambda x: fc_activ_dropout(x, latent_dim),
+                lambda x: fc_activ_dropout(x, latent_dim),
+                L.Linear(None, num_attributes),
                 chainer.functions.sigmoid
             )
 
             # ラベルのエンコーダは推論時に不要なのでTrainChainに含めるべきかもしれないけど、
             # 重みの復元&fine tuningを考えるとこっちに持っていた方がコードが完結になるか
             self.fe = chainer.Sequential(
-                chainer.links.Linear(None, 512),
-                chainer.functions.leaky_relu,
-                chainer.functions.dropout,
-                chainer.links.Linear(None, 128),
-                lambda x: chainer.functions.sigmoid(x) - 0.5
+                lambda x: fc_activ_dropout(x, latent_dim),
+                lambda x: fc_activ_dropout(x, latent_dim),
+                L.Linear(None, embed_dim),
+                lambda x: F.sigmoid(x) - 0.5
             )
 
     def forward(self, x):

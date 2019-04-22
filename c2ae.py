@@ -81,12 +81,11 @@ class C2AETrainChain(chainer.Chain):
         encoded_l = self.model.encode_label(t.astype(np.float32))
         e_loss = self.embedding_loss(encoded_x, encoded_l)
         o_loss = self.output_loss(decoded_x, t)
-        return e_loss, o_loss
+        return e_loss, o_loss * 10
 
     def forward(self, x, t):
         encoded_x, decoded_x = self.model(x)
         e_loss, o_loss = self.loss(encoded_x, decoded_x, t)
-        o_loss *= 10
         loss = e_loss + o_loss
         chainer.reporter.report(
             {'embed_loss': e_loss,
