@@ -196,6 +196,16 @@ class DebugModel(chainer.Chain):
         pass
 
 
+class LinearActiveDropout(chainer.Chain):
+    def __init__(self, dim):
+        super().__init__()
+        with self.init_scope():
+            self.fc = L.Linear(None, dim)
+
+    def forward(self, x):
+        return F.dropout(F.leaky_relu(self.fc(x)))
+
+
 class C2AE(chainer.Chain):
     def __init__(self, latent_dim, embed_dim):
         super().__init__()
@@ -210,12 +220,9 @@ class C2AE(chainer.Chain):
                 fc,
                 lambda x: F.sigmoid(x)-0.5)
 
-            def fc_activ_dropout(x, dim):
-                return F.dropout(F.leaky_relu(L.Linear(None, dim)(x)))
-
             self.fd = chainer.Sequential(
-                lambda x: fc_activ_dropout(x, latent_dim),
-                lambda x: fc_activ_dropout(x, latent_dim),
+                LinearActiveDropout(latent_dim),
+                LinearActiveDropout(latent_dim),
                 L.Linear(None, num_attributes),
                 chainer.functions.sigmoid
             )
@@ -223,8 +230,8 @@ class C2AE(chainer.Chain):
             # ラベルのエンコーダは推論時に不要なのでTrainChainに含めるべきかもしれないけど、
             # 重みの復元&fine tuningを考えるとこっちに持っていた方がコードが完結になるか
             self.fe = chainer.Sequential(
-                lambda x: fc_activ_dropout(x, latent_dim),
-                lambda x: fc_activ_dropout(x, latent_dim),
+                LinearActiveDropout(latent_dim),
+                LinearActiveDropout(latent_dim),
                 L.Linear(None, embed_dim),
                 lambda x: F.sigmoid(x) - 0.5
             )
