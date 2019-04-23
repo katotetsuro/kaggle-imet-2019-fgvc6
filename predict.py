@@ -218,7 +218,9 @@ class C2AE(chainer.Chain):
                 self.res,
                 F.dropout,
                 fc,
-                lambda x: F.sigmoid(x)-0.5)
+                lambda x: F.sigmoid(x),
+                lambda x: x/F.sqrt(F.sum(x**2, axis=1))[:, None]
+            )
 
             self.fd = chainer.Sequential(
                 LinearActiveDropout(latent_dim),
@@ -233,7 +235,8 @@ class C2AE(chainer.Chain):
                 LinearActiveDropout(latent_dim),
                 LinearActiveDropout(latent_dim),
                 L.Linear(None, embed_dim),
-                lambda x: F.sigmoid(x) - 0.5
+                lambda x: F.sigmoid(x) - 0.5,
+                lambda x: x/F.sqrt(F.sum(x**2, axis=1))[:, None]
             )
 
     def forward(self, x):
