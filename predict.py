@@ -220,7 +220,7 @@ class C2AE(chainer.Chain):
                 F.relu,
                 F.dropout,
                 L.Linear(None, embed_dim),
-                lambda x: F.sigmoid(x),
+                lambda x: F.sigmoid(x) - 0.5,
                 lambda x: x/F.sqrt(F.sum(x**2, axis=1))[:, None]
             )
 
@@ -228,7 +228,7 @@ class C2AE(chainer.Chain):
                 LinearActiveDropout(latent_dim),
                 LinearActiveDropout(latent_dim),
                 L.Linear(None, num_attributes),
-                chainer.functions.sigmoid
+                F.sigmoid
             )
 
             # ラベルのエンコーダは推論時に不要なのでTrainChainに含めるべきかもしれないけど、

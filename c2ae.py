@@ -20,25 +20,6 @@ class C2AETrainChain(chainer.Chain):
     def pairwise_sub(self, a, b):
         return a[:, :, None] - b[:, None, :]
 
-    # def embedding_loss(self, x, e):
-    #     xp = chainer.backends.cuda.get_array_module(x)
-    #     I = xp.eye(x.shape[1])
-    #     C1 = (x - e)  # shape (batchsize, embedding_dim)
-    #     C1 = F.matmul(C1, C1, transb=True)  # (embedding_dim, embedding_dim)
-
-    #     def trace(x):
-    #         return F.sum(F.diagonal(x))
-
-    #     C1 = trace(C1)
-
-    #     C2 = F.matmul(x, x, transa=True) - I
-    #     C2 = F.matmul(C2, C2, transb=True)
-
-    #     C3 = F.matmul(e, e, transa=True) - I
-    #     C3 = F.matmul(C3, C3, transb=True)
-    #     loss = C1 + 0.5 * trace(C2 + C3)
-    #     return loss
-
     def embedding_loss(self, x, e):
         C1 = F.sum((x-e)**2)
 
@@ -89,7 +70,7 @@ class C2AETrainChain(chainer.Chain):
         y_i_bar_sizes = F.sum(y_not_i.astype(np.float32), axis=1)
         normalizers = y_i_sizes * y_i_bar_sizes
 
-        loss = sums / (5*normalizers)
+        loss = sums / normalizers
         loss = F.clip(loss, -1e+6, 1e+6)
         loss = F.sum(loss)
         return loss
@@ -99,7 +80,7 @@ class C2AETrainChain(chainer.Chain):
             t.astype(np.float32))
         e_loss = self.embedding_loss(encoded_x, encoded_l)
         o_loss = self.output_loss(decoded_l, t)
-        return e_loss, o_loss * 10
+        return e_loss, o_loss * 1
 
     def forward(self, x, t):
         encoded_x, decoded_x = self.model(x)

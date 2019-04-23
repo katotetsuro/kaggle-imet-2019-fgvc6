@@ -183,6 +183,8 @@ class FScoreEvaluator(extensions.Evaluator):
             with chainer.function.no_backprop_mode():
                 pred, true, embed_loss, output_loss = infer(
                     it, target.model, self.device, target.loss)
+
+                print('---', np.min(pred), np.max(pred))
                 threshold, (precision, recall,
                             f2) = find_optimal_threshold(pred, true)
                 chainer.reporter.report({'embed_loss': embed_loss,
