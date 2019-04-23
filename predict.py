@@ -213,11 +213,13 @@ class C2AE(chainer.Chain):
             self.res = ResNet50(
                 pretrained_model=None if ON_KAGGLE else 'imagenet')
             self.res.pick = 'pool5'
-            fc = chainer.links.Linear(None, embed_dim)
             self.fx = chainer.Sequential(
                 self.res,
                 F.dropout,
-                fc,
+                L.Linear(None, latent_dim),
+                F.relu,
+                F.dropout,
+                L.Linear(None, embed_dim),
                 lambda x: F.sigmoid(x),
                 lambda x: x/F.sqrt(F.sum(x**2, axis=1))[:, None]
             )
@@ -244,8 +246,10 @@ class C2AE(chainer.Chain):
         h = self.fd(e)
         return e, h
 
-    def encode_label(self, y):
-        return self.fe(y)
+    def encode_decode_label(self, y):
+        e = self.fe(y)
+        d = self.fd(e)
+        return e, d
 
     def decode(self, x):
         h = self.fd(x)

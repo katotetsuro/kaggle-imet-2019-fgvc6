@@ -43,8 +43,9 @@ class C2AETrainChain(chainer.Chain):
         xp = chainer.backends.cuda.get_array_module(x)
         I = xp.eye(x.shape[1])
         C1 = F.sum((x-e)**2)
-        C2 = F.sum((F.matmul(x, x, transa=True) - I)**2)
-        C3 = F.sum((F.matmul(e, e, transa=True) - I)**2)
+        bs = len(x)
+        C2 = F.sum((F.matmul(x, x, transa=True) / bs - I)**2)
+        C3 = F.sum((F.matmul(e, e, transa=True) / bs - I)**2)
         loss = C1 + 0.5 * (C2 + C3)
         return loss
 
@@ -87,9 +88,10 @@ class C2AETrainChain(chainer.Chain):
         return loss
 
     def loss(self, encoded_x, decoded_x, t):
-        encoded_l = self.model.encode_label(t.astype(np.float32))
+        encoded_l, decoded_l = self.model.encode_decode_label(
+            t.astype(np.float32))
         e_loss = self.embedding_loss(encoded_x, encoded_l)
-        o_loss = self.output_loss(decoded_x, t)
+        o_loss = self.output_loss(decoded_l, t)
         return e_loss, o_loss * 10
 
     def forward(self, x, t):
