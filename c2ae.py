@@ -59,7 +59,7 @@ class C2AETrainChain(chainer.Chain):
         # calculate all exp'd differences
         # through and with truth_matrix, we can get all c_i - c_k(appear in the paper)
         sub_matrix = self.pairwise_sub(predictions, predictions)
-        exp_matrix = F.exp(-(5 * sub_matrix))
+        exp_matrix = F.exp(-(5*sub_matrix))
 
         # check which differences to consider and sum them
         sparse_matrix = exp_matrix * truth_matrix
@@ -80,7 +80,7 @@ class C2AETrainChain(chainer.Chain):
             t.astype(np.float32))
         e_loss = self.embedding_loss(encoded_x, encoded_l)
         o_loss = self.output_loss(decoded_l, t)
-        return e_loss, o_loss * 1
+        return e_loss * 10, o_loss * 1
 
     def forward(self, x, t):
         encoded_x, decoded_x = self.model(x)
