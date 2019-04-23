@@ -4,6 +4,19 @@ import chainer.links as L
 import numpy as np
 
 
+def focal_loss(y_pred, y_true):
+    """from https://www.kaggle.com/mathormad/pretrained-resnet50-focal-loss
+    """
+    gamma = 2.0
+    epsilon = 1e-5
+    pt = y_pred * y_true + (1-y_pred) * (1-y_true)
+    pt = F.clip(pt, epsilon, 1-epsilon)
+    CE = -F.log(pt)
+    FL = (1-pt)**gamma * CE
+    loss = F.sum(FL, axis=1)
+    return loss
+
+
 class C2AETrainChain(chainer.Chain):
     """
     copyright https://github.com/hinanmu/C2AE_tensorflow/blob/master/src/network.py
@@ -38,18 +51,6 @@ class C2AETrainChain(chainer.Chain):
         return loss
 
     def output_loss(self, predictions, labels):
-        """Computational error function,k属于Y，l属于Y补，计算ck - cl值，此时误差是对称的
-        Parameters
-        ----------
-        y : tensorflow tensor {0,1}
-            binary indicator matrix with label assignments.
-        output : tensorflow tensor [0,1]
-            neural network output value
-        Returns
-        -------
-        tensorflow tensor
-        """
-
         y_i = labels == 1
         y_not_i = labels == 0
 
@@ -73,13 +74,17 @@ class C2AETrainChain(chainer.Chain):
         loss = sums / normalizers
         loss = F.clip(loss, -1e+6, 1e+6)
         loss = F.sum(loss)
+
         return loss
+#        f_loss = F.mean(focal_loss(predictions, labels))
+
+ #       return loss + f_loss
 
     def loss(self, encoded_x, decoded_x, t):
         encoded_l, decoded_l = self.model.encode_decode_label(
             t.astype(np.float32))
         e_loss = self.embedding_loss(encoded_x, encoded_l)
-        o_loss = self.output_loss(decoded_l, t)
+        o_loss = self.output_loss(decoded_x, t)
         return e_loss * 10, o_loss * 1
 
     def forward(self, x, t):

@@ -127,19 +127,6 @@ def find_optimal_threshold(y, true):
     return best_threshold, f2_scores[best_threshold_index]
 
 
-def focal_loss(y_pred, y_true):
-    """from https://www.kaggle.com/mathormad/pretrained-resnet50-focal-loss
-    """
-    gamma = 2.0
-    epsilon = 1e-5
-    pt = y_pred * y_true + (1-y_pred) * (1-y_true)
-    pt = F.clip(pt, epsilon, 1-epsilon)
-    CE = -F.log(pt)
-    FL = (1-pt)**gamma * CE
-    loss = F.sum(FL, axis=1)
-    return loss
-
-
 def cooccurrence_loss(y_pred, y_true, mask):
     """学習データで共起してないところにロスをかける
     """
