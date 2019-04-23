@@ -33,20 +33,43 @@ class C2AETrainChain(chainer.Chain):
     def pairwise_sub(self, a, b):
         return a[:, :, None] - b[:, None, :]
 
-    def embedding_loss(self, x, e):
+    # def embedding_loss(self, x, e):
+    #     xp = chainer.backends.cuda.get_array_module(x)
+    #     I = xp.eye(x.shape[1])
+    #     C1 = (x - e)  # shape (batchsize, embedding_dim)
+    #     C1 = F.matmul(C1, C1, transb=True)  # (embedding_dim, embedding_dim)
+
+    #     def trace(x):
+    #         return F.sum(F.diagonal(x))
+
+    #     C1 = trace(C1)
+
+    #     C2 = F.matmul(x, x, transa=True) - I
+    #     C2 = F.matmul(C2, C2, transb=True)
+
+    #     C3 = F.matmul(e, e, transa=True) - I
+    #     C3 = F.matmul(C3, C3, transb=True)
+    #     loss = C1 + 0.5 * trace(C2 + C3)
+    #     return loss
+
+    def embedding_loss2(self, x, e):
         C1 = F.sum((x-e)**2)
 
         xp = chainer.backends.cuda.get_array_module(x)
 
         I = xp.eye(x.shape[1])[None]
-        x = x[:, :, None]
-        e = e[:, :, None]
+        # x = x[:, :, None]
+        # e = e[:, :, None]
 
-        C2 = (F.matmul(x, x, transb=True) - I)**2
-        C2 = F.sum(F.mean(C2, axis=(1, 2)))
+        """
+        埋め込みベクトルの属性について、バッチサイズに関する和を取った場合、対角成分がいくつになればいいのかはわからないと思う
+        少なくとも言えることは、対角成分以外は0になるようにしたいってことかなー
+        """
+        C2 = (F.matmul(x, x, transa=True) * (1-I))**2
+        C2 = F.sum(C2)
 
-        C3 = (F.matmul(e, e, transb=True) - I)**2
-        C3 = F.sum(F.mean(C3, axis=(1, 2)))
+        C3 = (F.matmul(e, e, transa=True) * (1-I))**2
+        C3 = F.sum(C3)
         loss = C1 + 0.5 * (C2 + C3)
         return loss
 
@@ -71,7 +94,7 @@ class C2AETrainChain(chainer.Chain):
         y_i_bar_sizes = F.sum(y_not_i.astype(np.float32), axis=1)
         normalizers = y_i_sizes * y_i_bar_sizes
 
-        loss = sums / normalizers
+        loss = sums / (5*normalizers)
         loss = F.clip(loss, -1e+6, 1e+6)
         loss = F.sum(loss)
 
@@ -83,9 +106,10 @@ class C2AETrainChain(chainer.Chain):
     def loss(self, encoded_x, decoded_x, t):
         encoded_l, decoded_l = self.model.encode_decode_label(
             t.astype(np.float32))
-        e_loss = self.embedding_loss(encoded_x, encoded_l)
+        e_loss = self.embedding_loss2(encoded_x, encoded_l)
+        print(e_loss, tmp)
         o_loss = self.output_loss(decoded_x, t)
-        return e_loss * 10, o_loss * 1
+        return e_loss, o_loss * 10
 
     def forward(self, x, t):
         encoded_x, decoded_x = self.model(x)
