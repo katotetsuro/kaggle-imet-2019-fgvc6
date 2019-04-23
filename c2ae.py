@@ -40,12 +40,19 @@ class C2AETrainChain(chainer.Chain):
     #     return loss
 
     def embedding_loss(self, x, e):
-        xp = chainer.backends.cuda.get_array_module(x)
-        I = xp.eye(x.shape[1])
         C1 = F.sum((x-e)**2)
-        bs = len(x)
-        C2 = F.sum((F.matmul(x, x, transa=True) / bs - I)**2)
-        C3 = F.sum((F.matmul(e, e, transa=True) / bs - I)**2)
+
+        xp = chainer.backends.cuda.get_array_module(x)
+
+        I = xp.eye(x.shape[1])[None]
+        x = x[:, :, None]
+        e = e[:, :, None]
+
+        C2 = (F.matmul(x, x, transb=True) - I)**2
+        C2 = F.sum(F.mean(C2, axis=(1, 2)))
+
+        C3 = (F.matmul(e, e, transb=True) - I)**2
+        C3 = F.sum(F.mean(C3, axis=(1, 2)))
         loss = C1 + 0.5 * (C2 + C3)
         return loss
 
