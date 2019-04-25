@@ -16,7 +16,6 @@ from chainer.training import triggers
 from chainerui.extensions import CommandsExtension
 from chainerui.utils import save_args
 
-from PIL import Image
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -24,28 +23,7 @@ from tqdm import tqdm
 from adam import Adam
 from lr_finder import LRFinder
 from predict import ImgaugTransformer, ResNet, DebugModel, infer, num_attributes, backbone_catalog
-
-
-class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
-    def __init__(self, df, data_dir):
-        super().__init__()
-        self.df = df
-        self.data_dir = data_dir
-
-    def __len__(self):
-        return len(self.df)
-
-    def get_example(self, i):
-        image_id, attributes = self.df.iloc[i]
-        attributes = list(map(int, attributes.split(' ')))
-        # TODO one_hot vectorの保持はメモリの無駄か
-        one_hot_attributes = np.zeros(num_attributes, dtype=np.int32)
-        for a in attributes:
-            one_hot_attributes[a] = 1
-        image = Image.open(join(self.data_dir, image_id + '.png'))
-        image = image.convert('RGB')
-        image = np.asarray(image).astype(np.uint8)
-        return image, one_hot_attributes
+from dataset import MultilabelPandasDataset, MixupDataset
 
 
 def make_folds(n_folds: int, df: pd.DataFrame) -> pd.DataFrame:
@@ -81,7 +59,7 @@ def count_cooccurrence(df):
     return co
 
 
-def get_dataset(data_dir, size, limit):
+def get_dataset(data_dir, size, limit, mixup):
     df = pd.read_csv(join(data_dir, 'train.csv'))
     co = count_cooccurrence(df)
     df = make_folds(5, df)
@@ -95,9 +73,15 @@ def get_dataset(data_dir, size, limit):
     train = MultilabelPandasDataset(train, join(data_dir, 'train'))
     train = chainer.datasets.TransformDataset(
         train, ImgaugTransformer(size, True))
+
     test = MultilabelPandasDataset(test, join(data_dir, 'train'))
     test = chainer.datasets.TransformDataset(
         test, ImgaugTransformer(size, False))
+
+    if mixup:
+        print('mixup')
+        train = MixupDataset(train)
+        test = MixupDataset(test)
 
     return train, test, co
 
@@ -281,8 +265,6 @@ def main(args=None):
                         help='Directory to output the result')
     parser.add_argument('--resume', '-r', default='',
                         help='Resume the training from snapshot')
-    parser.add_argument('--weight-positive-sample',
-                        '-w', type=float, default=1)
     parser.add_argument('--loss-function',
                         choices=['focal', 'sigmoid'], default='focal')
     parser.add_argument(
@@ -294,25 +276,27 @@ def main(args=None):
     parser.add_argument('--pretrained', type=str, default='')
     parser.add_argument(
         '--backbone', choices=['resnet', 'seresnet', 'seresnext', 'debug_model', 'co_resnet'], default='resnet')
-    parser.add_argument('--co-coef', type=float, default=0.05)
-    parser.add_argument('--two-step', action='store_true')
     parser.add_argument('--log-interval', type=int, default=100)
     parser.add_argument('--dropout', action='store_true')
     parser.add_argument('--find-threshold', action='store_true')
     parser.add_argument('--finetune', action='store_true')
+    parser.add_argument('--mixup', action='store_true')
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
 
+    if args.mixup and args.loss_function != 'focal':
+        raise ValueError('mixupを使うときはfocal lossしか使えません（いまんところ）')
+
     train, test, cooccurrence = get_dataset(
-        args.data_dir, args.size, args.limit)
+        args.data_dir, args.size, args.limit, args.mixup)
     base_model = backbone_catalog[args.backbone](args.dropout)
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
         chainer.serializers.load_npz(args.pretrained, base_model, strict=False)
-    model = TrainChain(base_model, args.weight_positive_sample,
-                       loss_fn=args.loss_function, cooccurrence=cooccurrence, co_coef=args.co_coef)
+    model = TrainChain(base_model, 1,
+                       loss_fn=args.loss_function, cooccurrence=cooccurrence, co_coef=0)
     if args.gpu >= 0:
         chainer.backends.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
