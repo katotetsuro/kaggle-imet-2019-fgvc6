@@ -40,7 +40,8 @@ class MixupDataset(chainer.dataset.DatasetMixin):
     def get_example(self, i):
         img_1, label_1 = self.dataset[self.indexes[2*i]]
         img_2, label_2 = self.dataset[self.indexes[2*i+1]]
-        mix_ratio = np.random.beta(1, 1)
+        alpha = 0.2
+        mix_ratio = np.random.beta(alpha, alpha)
         img = mix_ratio * img_1 + (1-mix_ratio) * img_2
         label = mix_ratio * label_1 + (1-mix_ratio) * label_2
 

@@ -81,7 +81,6 @@ def get_dataset(data_dir, size, limit, mixup):
     if mixup:
         print('mixup')
         train = MixupDataset(train)
-        test = MixupDataset(test)
 
     return train, test, co
 
@@ -357,7 +356,7 @@ def main(args=None):
         # Adamにweight decayはあんまりよくないらしい
         optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
         trainer.extend(extensions.ExponentialShift(
-            'lr', 0.5), trigger=(10, 'epoch'))
+            'lr', 0.1), trigger=(3, 'epoch'))
         if args.lr_search:
             print('最適な学習率を探します')
             trainer.extend(LRFinder(1e-7, 1, 5, optimizer),
