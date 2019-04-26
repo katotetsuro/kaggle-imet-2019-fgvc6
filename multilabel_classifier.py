@@ -123,6 +123,16 @@ def focal_loss(y_pred, y_true):
     return loss
 
 
+def softlabel_focal_loss(y_pred, y_true):
+    gamma = 2.0
+    epsilon = 1e-5
+    pt = y_pred * y_true + (1-y_pred) * (1-y_true)
+    CE = -F.log(y_pred+epsilon) * y_true - F.log(1-y_pred+epsilon) * (1-y_true)
+    FL = (1-pt)**gamma * CE
+    loss = F.sum(FL, axis=1)
+    return loss
+
+
 def cooccurrence_loss(y_pred, y_true, mask):
     """学習データで共起してないところにロスをかける
     """
