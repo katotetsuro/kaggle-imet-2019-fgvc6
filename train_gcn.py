@@ -3,6 +3,7 @@ from pathlib import Path
 from glob import glob
 import pickle
 import argparse
+from itertools import combinations
 
 import chainer
 import chainer.links as L
@@ -12,25 +13,41 @@ from chainer.training import extensions
 from chainer.training import triggers
 from chainerui.extensions import CommandsExtension
 from chainerui.utils import save_args
-from chainercv.links.model.resnet import ResNet50
+from chainercv.links.model.resnet import ResNet50, ResNet101
 from chainercv.links.model.senet import SEResNet50
 
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 
 from adam import Adam
 from lr_finder import LRFinder
-from predict import ImgaugTransformer, ResNet, DebugModel, infer, backbone_catalog
-import predict
+from predict import ImgaugTransformer, ResNet, DebugModel, infer, backbone_catalog, num_attributes
 from dataset import MultilabelPandasDataset, MixupDataset
-from multilabel_classifier import make_folds, count_cooccurrence, get_dataset, f2_score, find_optimal_threshold, set_random_seed
+from multilabel_classifier import make_folds, get_dataset, f2_score, find_optimal_threshold, set_random_seed, FScoreEvaluator, focal_loss, find_threshold
 from graph_convolution import GraphConvolutionalNetwork
 
-#num_attributes = predict.num_attributes
-num_attributes = 10
+
+def count_cooccurrence(df, num_attributes=1103, count_self=True):
+    co = np.zeros((num_attributes, num_attributes), dtype=np.int32)
+    for row in df.itertuples(index=False):
+        id, attr = row
+
+        attrs = list(map(int, attr.split(' ')))
+        for i, j in combinations(attrs, 2):
+            co[i, j] += 1
+            co[j, i] += 1
+
+        if count_self:
+            for i in attrs:
+                co[i, i] += 1
+
+    return co
 
 
-def make_adjacent_matrix(counts):
+def make_adjacent_matrix(train_file):
+    df = pd.read_csv(train_file)
+    counts = count_cooccurrence(df, 10)
     conditional_probs = counts / np.diag(counts)
     binary_correlations = np.where(conditional_probs > 0.1, 1.0, 0.0)
     p = 0.2
@@ -39,22 +56,32 @@ def make_adjacent_matrix(counts):
     reweighted_correlations = np.where(
         np.eye(len(binary_correlations)), 1-p, binary_correlations * p / a)
 
-    return reweighted_correlations
+    return reweighted_correlations.astype(np.float32)
 
 
 class GCNCNN(chainer.Chain):
-    def __init__(self, adjacent, embeddings):
+    def __init__(self, adjacent, embeddings, train_cnn):
         super().__init__()
         with self.init_scope():
             self.gcn = GraphConvolutionalNetwork(adjacent)
             self.cnn = ResNet50(pretrained_model='imagenet')
+            self.cnn.pick = 'res5'
 
         self.embeddings = embeddings
+        self.train_cnn = train_cnn
 
     def forward(self, x):
-        y_1 = self.cnn.forward(x)
+        if self.train_cnn:
+            y_1 = self.cnn(x)
+        else:
+            with chainer.using_config('train', False), chainer.using_config('enable_backprop', False):
+                y_1 = self.cnn(x)
+
+        s = y_1.shape[2]
+        y_1 = F.max_pooling_2d(y_1, s)[:, :, 0, 0]
         y_2 = self.gcn(self.embeddings)
-        h = F.matmul(y_1, y_2)
+
+        h = F.matmul(y_1, y_2, transb=True)
         return h
 
     def freeze(self):
@@ -64,6 +91,20 @@ class GCNCNN(chainer.Chain):
     def unfreeze(self):
         if not self.cnn.update_enabled:
             self.cnn.enable_update()
+
+    def to_gpu(self, device=None):
+        super().to_gpu(device)
+        chainer.backends.cuda.to_gpu(self.embeddings, device=device)
+
+    def to_cpu(self):
+        super().to_cpu()
+        chainer.backends.cuda.to_cpu(self.embeddings, device=device)
+
+
+def multilabel_soft_margin_loss(y, t):
+    loss = -(t * F.log(F.sigmoid(y)+1e-8) +
+             (1 - t) * F.log(F.sigmoid(-y)+1e-8))
+    return F.mean(loss)
 
 
 class TrainChain(chainer.Chain):
@@ -77,6 +118,8 @@ class TrainChain(chainer.Chain):
         elif loss_fn == 'sigmoid':
             self.loss_fn = lambda x, t: F.sum(F.sigmoid_cross_entropy(
                 x, t, reduce='no'))
+        elif loss_fn == 'margin':
+            self.loss_fn = multilabel_soft_margin_loss
         else:
             raise ValueError('unknown loss function. {}'.format(loss_fn))
 
@@ -116,7 +159,7 @@ def main(args=None):
     parser.add_argument('--resume', '-r', default='',
                         help='Resume the training from snapshot')
     parser.add_argument('--loss-function',
-                        choices=['focal', 'sigmoid'], default='focal')
+                        choices=['focal', 'sigmoid', 'margin'], default='focal')
     parser.add_argument(
         '--optimizer', choices=['sgd', 'adam', 'adabound'], default='adam')
     parser.add_argument('--size', type=int, default=224)
@@ -130,6 +173,9 @@ def main(args=None):
     parser.add_argument('--find-threshold', action='store_true')
     parser.add_argument('--finetune', action='store_true')
     parser.add_argument('--mixup', action='store_true')
+    parser.add_argument(
+        '--adjacent', default='data/reweighted_correlations.npy', type=str)
+    parser.add_argument('--feat', default='data/feat_original.npy', type=str)
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
@@ -137,15 +183,17 @@ def main(args=None):
     if args.mixup and args.loss_function != 'focal':
         raise ValueError('mixupを使うときはfocal lossしか使えません（いまんところ）')
 
-    train, test, cooccurrence = get_dataset(
+    train, test = get_dataset(
         args.data_dir, args.size, args.limit, args.mixup)
-    base_model = backbone_catalog[args.backbone](args.dropout)
+    adjacent = make_adjacent_matrix('data/toy/train.csv')
+    adjacent = np.eye(len(adjacent))
+    embeddings = np.load(args.feat)
+    base_model = GCNCNN(adjacent, embeddings, False)
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
         chainer.serializers.load_npz(args.pretrained, base_model, strict=False)
-    model = TrainChain(base_model, 1,
-                       loss_fn=args.loss_function, cooccurrence=cooccurrence, co_coef=0)
+    model = TrainChain(base_model, loss_fn=args.loss_function)
     if args.gpu >= 0:
         chainer.backends.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
@@ -228,7 +276,7 @@ def main(args=None):
         trigger=(args.log_interval, 'iteration')))
 
     trainer.extend(extensions.PrintReport(
-        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'main/co_loss', 'validation/main/loss', 'validation/main/co_loss', 'validation/main/precision',
+        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'validation/main/loss', 'validation/main/precision',
          'validation/main/recall', 'validation/main/f2', 'validation/main/threshold']))
 
     trainer.extend(extensions.ProgressBar(update_interval=args.log_interval))

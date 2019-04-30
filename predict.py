@@ -26,7 +26,7 @@ except ImportError:
     ResNet50 = dill.load(
         open('../input/model-definitions/resnet50_def.dill', 'rb'))
 
-num_attributes = 1103
+num_attributes = 10  # 1103
 num_culture = 398
 
 # copyright https://github.com/lopuhin/kaggle-imet-2019/blob/master/imet/utils.py
@@ -244,7 +244,6 @@ def infer(data_iter, model, gpu, loss_fn=None):
         pred = []
         true = []
         losses = []
-        co_losses = []
         for batch in data_iter:
             batch = chainer.dataset.concat_examples(batch, device=gpu)
             if len(batch) == 2:
@@ -258,13 +257,12 @@ def infer(data_iter, model, gpu, loss_fn=None):
             pred.append(chainer.backends.cuda.to_cpu(F.sigmoid(y).array))
             if loss_fn is not None:
                 loss = loss_fn(y, t)
-                losses.append(chainer.backends.cuda.to_cpu(loss[0].array))
-                co_losses.append(chainer.backends.cuda.to_cpu(loss[1].array))
+                losses.append(chainer.backends.cuda.to_cpu(loss.array))
     pred = np.concatenate(pred)
     if len(true):
         true = np.concatenate(true)
         if loss_fn is not None:
-            return pred, true, np.mean(losses), np.mean(co_losses)
+            return pred, true, np.mean(losses)
         else:
             return pred, true
     else:

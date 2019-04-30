@@ -5,7 +5,6 @@ import pickle
 import argparse
 from collections import defaultdict, Counter
 import random
-from itertools import combinations
 
 import chainer
 import chainer.links as L
@@ -48,20 +47,8 @@ def make_folds(n_folds: int, df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def count_cooccurrence(df, n=num_attributes):
-    co = np.zeros((n, n), dtype=np.int32)
-    for row in df.itertuples(index=False):
-        id, attr = row
-        for i, j in combinations(map(int, attr.split(' ')), 2):
-            co[i, j] += 1
-            co[j, i] += 1
-
-    return co
-
-
 def get_dataset(data_dir, size, limit, mixup):
-    df = pd.read_csv(join(data_dir, 'train.csv'))
-    co = count_cooccurrence(df)
+    df = pd.read_csv(join(data_dir, 'toy/train.csv'))
     df = make_folds(5, df)
     train = df[df.fold != 0]
     test = df[df.fold == 0]
@@ -82,7 +69,7 @@ def get_dataset(data_dir, size, limit, mixup):
         print('mixup')
         train = MixupDataset(train)
 
-    return train, test, co
+    return train, test
 
 
 def f2_score(pred, true):
@@ -112,6 +99,8 @@ def find_optimal_threshold(y, true):
 def focal_loss(y_pred, y_true):
     """from https://www.kaggle.com/mathormad/pretrained-resnet50-focal-loss
     """
+    import pdb
+    pdb.set_trace()
     gamma = 2.0
     epsilon = 1e-5
     pt = y_pred * y_true + (1-y_pred) * (1-y_true)
@@ -229,12 +218,11 @@ class FScoreEvaluator(extensions.Evaluator):
         target = self._targets['main']
         with chainer.reporter.report_scope(observation):
             with chainer.function.no_backprop_mode():
-                pred, true, loss, co_loss = infer(
+                pred, true, loss = infer(
                     it, target.model, self.device, target.loss)
                 threshold, (precision, recall,
                             f2) = find_optimal_threshold(pred, true)
-                chainer.reporter.report({'loss': loss/it.batch_size,
-                                         'co_loss': co_loss/it.batch_size,
+                chainer.reporter.report({'loss': loss,
                                          'precision': precision,
                                          'recall': recall,
                                          'f2': f2}, target)

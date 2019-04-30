@@ -9,3 +9,4 @@ pretrained
 *.dill
 *.csv
 analysis
+*.npy
