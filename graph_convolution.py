@@ -47,12 +47,14 @@ class GraphModule(chainer.Chain):
         return F.matmul(self.adjacent, self.w(x))
 
     def to_gpu(self, device=None):
-        super().to_gpu(device)
-        chainer.backends.cuda.to_gpu(self.adjacent, device=device)
+        self.adjacent = chainer.backends.cuda.to_gpu(
+            self.adjacent, device=device)
+        return super().to_gpu(device)
 
     def to_cpu(self):
-        super().to_cpu()
-        chainer.backends.cuda.to_cpu(self.adjacent, device=device)
+        self.adjacent = chainer.backends.cuda.to_cpu(
+            self.adjacent, device=device)
+        return super().to_cpu()
 
 
 class GraphConvolutionalNetwork(chainer.Chain):

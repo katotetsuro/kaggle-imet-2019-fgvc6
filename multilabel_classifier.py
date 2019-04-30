@@ -99,8 +99,6 @@ def find_optimal_threshold(y, true):
 def focal_loss(y_pred, y_true):
     """from https://www.kaggle.com/mathormad/pretrained-resnet50-focal-loss
     """
-    import pdb
-    pdb.set_trace()
     gamma = 2.0
     epsilon = 1e-5
     pt = y_pred * y_true + (1-y_pred) * (1-y_true)

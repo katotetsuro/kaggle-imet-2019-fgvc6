@@ -93,17 +93,19 @@ class GCNCNN(chainer.Chain):
             self.cnn.enable_update()
 
     def to_gpu(self, device=None):
-        super().to_gpu(device)
-        chainer.backends.cuda.to_gpu(self.embeddings, device=device)
+        self.embeddings = chainer.backends.cuda.to_gpu(
+            self.embeddings, device=device)
+        return super().to_gpu(device)
 
     def to_cpu(self):
-        super().to_cpu()
-        chainer.backends.cuda.to_cpu(self.embeddings, device=device)
+        self.embeddings = chainer.backends.cuda.to_cpu(
+            self.embeddings, device=device)
+        return super().to_cpu()
 
 
 def multilabel_soft_margin_loss(y, t):
-    loss = -(t * F.log(F.sigmoid(y)+1e-8) +
-             (1 - t) * F.log(F.sigmoid(-y)+1e-8))
+    loss = -(t * F.log(F.sigmoid(-y)+1e-8) +
+             (1 - t) * F.log(F.sigmoid(y)+1e-8))
     return F.mean(loss)
 
 
@@ -184,7 +186,6 @@ def main(args=None):
     train, test = get_dataset(
         args.data_dir, args.size, args.limit, args.mixup)
     adjacent = make_adjacent_matrix('data/toy/train.csv')
-    adjacent = np.eye(len(adjacent))
     embeddings = np.load(args.feat)
     base_model = GCNCNN(adjacent, embeddings, False)
 
@@ -203,6 +204,7 @@ def main(args=None):
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
     optimizer.setup(model)
+    optimizer.add_hook(chainer.optimizer_hooks.GradientClipping(2))
 
     if not args.finetune:
         print('最初のエポックは特徴抽出層をfreezeします')
@@ -240,9 +242,9 @@ def main(args=None):
 
     if args.optimizer == 'sgd':
         # Adamにweight decayはあんまりよくないらしい
-        optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
+        optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(1e-4))
         trainer.extend(extensions.ExponentialShift(
-            'lr', 0.1), trigger=(3, 'epoch'))
+            'lr', 0.1), trigger=(args.epoch // 3, 'epoch'))
         if args.lr_search:
             print('最適な学習率を探します')
             trainer.extend(LRFinder(1e-7, 1, 5, optimizer),
