@@ -173,8 +173,6 @@ def main(args=None):
     parser.add_argument('--find-threshold', action='store_true')
     parser.add_argument('--finetune', action='store_true')
     parser.add_argument('--mixup', action='store_true')
-    parser.add_argument(
-        '--adjacent', default='data/reweighted_correlations.npy', type=str)
     parser.add_argument('--feat', default='data/feat_original.npy', type=str)
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
