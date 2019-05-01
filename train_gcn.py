@@ -104,8 +104,8 @@ class GCNCNN(chainer.Chain):
 
 
 def multilabel_soft_margin_loss(y, t):
-    loss = -(t * F.log(F.sigmoid(-y)+1e-8) +
-             (1 - t) * F.log(F.sigmoid(y)+1e-8))
+    loss = -(t * F.log(F.sigmoid(y)+1e-8) +
+             (1 - t) * F.log(F.sigmoid(-y)+1e-8))
     return F.mean(loss)
 
 
@@ -187,7 +187,7 @@ def main(args=None):
         args.data_dir, args.size, args.limit, args.mixup)
     adjacent = make_adjacent_matrix('data/toy/train.csv')
     embeddings = np.load(args.feat)
-    base_model = GCNCNN(adjacent, embeddings, False)
+    base_model = GCNCNN(adjacent, embeddings, True)
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
