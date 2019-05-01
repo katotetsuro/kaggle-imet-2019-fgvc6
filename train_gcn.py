@@ -64,7 +64,7 @@ class GCNCNN(chainer.Chain):
         super().__init__()
         with self.init_scope():
             self.gcn = GraphConvolutionalNetwork(adjacent)
-            self.cnn = ResNet50(pretrained_model='imagenet')
+            self.cnn = SEResNet50(pretrained_model='imagenet')
             self.cnn.pick = 'res5'
 
         self.embeddings = embeddings
