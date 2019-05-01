@@ -206,7 +206,8 @@ def main(args=None):
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
     optimizer.setup(model)
-    optimizer.add_hook(chainer.optimizer_hooks.GradientClipping(2))
+    if args.loss_function == 'margin':
+        optimizer.add_hook(chainer.optimizer_hooks.GradientClipping(2))
 
     if not args.finetune:
         print('最初のエポックは特徴抽出層をfreezeします')
