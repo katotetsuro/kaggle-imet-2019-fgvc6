@@ -48,7 +48,7 @@ def make_folds(n_folds: int, df: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_dataset(data_dir, size, limit, mixup):
-    df = pd.read_csv(join(data_dir, 'toy/train.csv'))
+    df = pd.read_csv(join(data_dir, 'train.csv'))
     df = make_folds(5, df)
     train = df[df.fold != 0]
     test = df[df.fold == 0]
