@@ -47,7 +47,7 @@ def count_cooccurrence(df, num_attributes=1103, count_self=True):
 
 def make_adjacent_matrix(train_file):
     df = pd.read_csv(train_file)
-    counts = count_cooccurrence(df, 10)
+    counts = count_cooccurrence(df, num_attributes)
     conditional_probs = counts / np.diag(counts)
     binary_correlations = np.where(conditional_probs > 0.1, 1.0, 0.0)
     p = 0.2
@@ -187,7 +187,7 @@ def main(args=None):
 
     train, test = get_dataset(
         args.data_dir, args.size, args.limit, args.mixup)
-    adjacent = make_adjacent_matrix('data/toy/train.csv')
+    adjacent = make_adjacent_matrix('data/train.csv')
     embeddings = np.load(args.feat)
     base_model = GCNCNN(adjacent, embeddings, True)
 
@@ -213,8 +213,6 @@ def main(args=None):
         elif args.optimizer == 'adam':
             p.update_rule.hyperparam.alpha *= 0.1
         elif args.optimizer == 'sgd':
-            import pdb
-            pdb.set_trace()
             p.update_rule.hyperparam.lr *= 0.1
 
     if not args.finetune:

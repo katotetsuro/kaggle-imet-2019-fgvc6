@@ -26,7 +26,7 @@ except ImportError:
     ResNet50 = dill.load(
         open('../input/model-definitions/resnet50_def.dill', 'rb'))
 
-num_attributes = 10  # 1103
+num_attributes = 1103
 num_culture = 398
 
 # copyright https://github.com/lopuhin/kaggle-imet-2019/blob/master/imet/utils.py
