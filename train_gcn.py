@@ -206,8 +206,16 @@ def main(args=None):
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
     optimizer.setup(model)
-    if args.loss_function == 'margin':
-        optimizer.add_hook(chainer.optimizer_hooks.GradientClipping(2))
+    optimizer.add_hook(chainer.optimizer_hooks.GradientClipping(10))
+    for p in base_model.cnn.params():
+        if args.optimizer == 'adabound':
+            p.update_rule.hyperparam.initial_alpha *= 0.1
+        elif args.optimizer == 'adam':
+            p.update_rule.hyperparam.alpha *= 0.1
+        elif args.optimizer == 'sgd':
+            import pdb
+            pdb.set_trace()
+            p.update_rule.hyperparam.lr *= 0.1
 
     if not args.finetune:
         print('最初のエポックは特徴抽出層をfreezeします')
