@@ -77,9 +77,11 @@ class GCNCNN(chainer.Chain):
             with chainer.using_config('train', False), chainer.using_config('enable_backprop', False):
                 y_1 = self.cnn(x)
 
+        y_1 = F.dropout(y_1)
         s = y_1.shape[2]
         y_1 = F.max_pooling_2d(y_1, s)[:, :, 0, 0]
         y_2 = self.gcn(self.embeddings)
+        y_2 = F.dropout(y_2)
 
         h = F.matmul(y_1, y_2, transb=True)
         return h

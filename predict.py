@@ -52,7 +52,7 @@ class ImageDataset(chainer.dataset.DatasetMixin):
 class ImgaugTransformer(chainer.datasets.TransformDataset):
     def __init__(self, size, train):
         self.seq = iaa.Sequential([iaa.OneOf([
-            iaa.CropToFixedSize(size, size),
+            #iaa.PadToFixedSize(size, size),
             iaa.Resize((size, size))
         ], random_state=63),  # end of OneOf
             iaa.Fliplr(0.5),
