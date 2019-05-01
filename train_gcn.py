@@ -276,7 +276,7 @@ def main(args=None):
         trigger=(args.log_interval, 'iteration')))
 
     trainer.extend(extensions.PrintReport(
-        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'validation/main/loss', 'validation/main/precision',
+        ['epoch', 'lr', 'main/loss', 'validation/main/loss', 'validation/main/precision',
          'validation/main/recall', 'validation/main/f2', 'validation/main/threshold']))
 
     trainer.extend(extensions.ProgressBar(update_interval=args.log_interval))
