@@ -26,6 +26,7 @@ from predict import ImgaugTransformer, ResNet, DebugModel, infer, backbone_catal
 from dataset import MultilabelPandasDataset, MixupDataset
 from multilabel_classifier import make_folds, get_dataset, f2_score, find_optimal_threshold, set_random_seed, FScoreEvaluator, focal_loss, find_threshold
 from graph_convolution import GraphConvolutionalNetwork
+from cyclical_lr_scheduler import CosineAnnealing
 
 
 def count_cooccurrence(df, num_attributes=1103, count_self=True):
@@ -221,8 +222,8 @@ def main(args=None):
 
     train_iter = chainer.iterators.MultiprocessIterator(
         train, args.batchsize, n_processes=8, n_prefetch=2)
-    test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
-                                                      repeat=False, shuffle=False)
+    test_iter = chainer.iterators.MultiprocessIterator(test, args.batchsize, n_processes=8, n_prefetch=2,
+                                                       repeat=False, shuffle=False)
 
     if args.find_threshold:
         # train_iter, optimizerなど無駄なsetupもあるが。。
@@ -252,8 +253,10 @@ def main(args=None):
     if args.optimizer == 'sgd':
         # Adamにweight decayはあんまりよくないらしい
         optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(1e-4))
-        trainer.extend(extensions.ExponentialShift(
-            'lr', 0.1), trigger=(args.epoch // 3, 'epoch'))
+        # trainer.extend(extensions.ExponentialShift(
+        #     'lr', 0.1), trigger=(args.epoch // 3, 'epoch'))
+        trainer.extend(CosineAnnealing(
+            lr_max=args.learnrate, T_0=10), (1, 'iteration'))
         if args.lr_search:
             print('最適な学習率を探します')
             trainer.extend(LRFinder(1e-7, 1, 5, optimizer),
