@@ -46,11 +46,11 @@ def count_cooccurrence(df, num_attributes=1103, count_self=True):
     return co
 
 
-def make_adjacent_matrix(train_file):
+def make_adjacent_matrix(train_file, t):
     df = pd.read_csv(train_file)
     counts = count_cooccurrence(df, num_attributes)
     conditional_probs = counts / np.diag(counts)
-    binary_correlations = np.where(conditional_probs > 0.1, 1.0, 0.0)
+    binary_correlations = np.where(conditional_probs > t, 1.0, 0.0)
     p = 0.2
     a = np.maximum(np.sum(binary_correlations, axis=1) -
                    np.diag(binary_correlations), 1).reshape(-1, 1)
@@ -188,7 +188,7 @@ def main(args=None):
 
     train, test = get_dataset(
         args.data_dir, args.size, args.limit, args.mixup)
-    adjacent = make_adjacent_matrix('data/train.csv')
+    adjacent = make_adjacent_matrix('data/train.csv', 0.4)
     embeddings = np.load(args.feat)
     base_model = GCNCNN(adjacent, embeddings, True)
 
@@ -208,13 +208,13 @@ def main(args=None):
 
     optimizer.setup(model)
     optimizer.add_hook(chainer.optimizer_hooks.GradientClipping(10))
-    for p in base_model.cnn.params():
-        if args.optimizer == 'adabound':
-            p.update_rule.hyperparam.initial_alpha *= 0.1
-        elif args.optimizer == 'adam':
-            p.update_rule.hyperparam.alpha *= 0.1
-        elif args.optimizer == 'sgd':
-            p.update_rule.hyperparam.lr *= 0.1
+    # for p in base_model.cnn.params():
+    #     if args.optimizer == 'adabound':
+    #         p.update_rule.hyperparam.initial_alpha *= 0.1
+    #     elif args.optimizer == 'adam':
+    #         p.update_rule.hyperparam.alpha *= 0.1
+    #     elif args.optimizer == 'sgd':
+    #         p.update_rule.hyperparam.lr *= 0.1
 
     if not args.finetune:
         print('最初のエポックは特徴抽出層をfreezeします')
