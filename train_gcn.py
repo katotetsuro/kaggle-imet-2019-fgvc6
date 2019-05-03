@@ -179,6 +179,7 @@ def main(args=None):
     parser.add_argument('--finetune', action='store_true')
     parser.add_argument('--mixup', action='store_true')
     parser.add_argument('--feat', default='data/feat_original.npy', type=str)
+    parser.add_argument('--adj-threshold', default=0.4, type=float)
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
@@ -188,7 +189,7 @@ def main(args=None):
 
     train, test = get_dataset(
         args.data_dir, args.size, args.limit, args.mixup)
-    adjacent = make_adjacent_matrix('data/train.csv', 0.4)
+    adjacent = make_adjacent_matrix('data/train.csv', args.adj_threshold)
     embeddings = np.load(args.feat)
     base_model = GCNCNN(adjacent, embeddings, True)
 
