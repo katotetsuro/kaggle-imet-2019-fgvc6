@@ -51,13 +51,20 @@ def make_adjacent_matrix(train_file, t):
     counts = count_cooccurrence(df, num_attributes)
     conditional_probs = counts / np.diag(counts)
     binary_correlations = np.where(conditional_probs > t, 1.0, 0.0)
-    p = 0.2
+    p = 0.25
     a = np.maximum(np.sum(binary_correlations, axis=1) -
                    np.diag(binary_correlations), 1).reshape(-1, 1)
     reweighted_correlations = np.where(
-        np.eye(len(binary_correlations)), 1-p, binary_correlations * p / a)
+        np.eye(len(binary_correlations)), 1, binary_correlations * p / a)
 
-    return reweighted_correlations.astype(np.float32)
+    reweighted_correlations = reweighted_correlations.astype(np.float32)
+
+    # よくわからんけどソース読んだ結果
+    D = np.power(np.sum(reweighted_correlations, axis=1), -0.5)
+    D = np.diag(D)
+    adj = reweighted_correlations.dot(D).T.dot(D)
+
+    return adj
 
 
 class GCNCNN(chainer.Chain):
@@ -223,8 +230,8 @@ def main(args=None):
 
     train_iter = chainer.iterators.MultiprocessIterator(
         train, args.batchsize, n_processes=8, n_prefetch=2)
-    test_iter = chainer.iterators.MultiprocessIterator(test, args.batchsize, n_processes=8, n_prefetch=2,
-                                                       repeat=False, shuffle=False)
+    test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
+                                                      repeat=False, shuffle=False)
 
     if args.find_threshold:
         # train_iter, optimizerなど無駄なsetupもあるが。。
@@ -257,7 +264,7 @@ def main(args=None):
         # trainer.extend(extensions.ExponentialShift(
         #     'lr', 0.1), trigger=(args.epoch // 3, 'epoch'))
         trainer.extend(CosineAnnealing(
-            lr_max=args.learnrate, T_0=10), (1, 'iteration'))
+            lr_max=args.learnrate, T_0=1e+6), (1, 'iteration'))
         if args.lr_search:
             print('最適な学習率を探します')
             trainer.extend(LRFinder(1e-7, 1, 5, optimizer),
@@ -268,7 +275,7 @@ def main(args=None):
             trainer.extend(LRFinder(1e-7, 1, 5, optimizer,
                                     lr_key='alpha'), trigger=(1, 'iteration'))
 
-        trainer.extend(extensions.ExponentialShift('alpha', 0.2),
+        trainer.extend(extensions.ExponentialShift('alpha', 0.5),
                        trigger=triggers.EarlyStoppingTrigger(monitor='validation/main/loss'))
 
     # Take a snapshot of Trainer at each epoch
