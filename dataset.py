@@ -44,7 +44,7 @@ class BalancedOrderSampler(chainer.iterators.OrderSampler):
 
     def __call__(self, current_order, current_position):
         n = len(self.probs)
-        return np.random.choice(n, n, replace=False, p=self.probs)
+        return np.random.choice(n, n, replace=True, p=self.probs)
 
 
 class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
