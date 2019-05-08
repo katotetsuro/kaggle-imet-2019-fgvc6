@@ -22,7 +22,7 @@ from tqdm import tqdm
 from adam import Adam
 from lr_finder import LRFinder
 from predict import ImgaugTransformer, ResNet, DebugModel, infer, num_attributes, backbone_catalog
-from dataset import MultilabelPandasDataset, MixupDataset
+from dataset import MultilabelPandasDataset, MixupDataset, BalancedOrderSampler
 
 
 def make_folds(n_folds: int, df: pd.DataFrame) -> pd.DataFrame:
@@ -83,6 +83,11 @@ def get_dataset(data_dir, size, limit, mixup):
     if limit is not None:
         train = train[:limit]
         test = test[:limit]
+        print('limitが指定されているときはShuffleOrderSamplerしか使えない')
+        order_sampler = chainer.iterators.ShuffleOrderSampler()
+    else:
+        print('balanced order samplerをつかいます')
+        order_sampler = BalancedOrderSampler(train)
     train = MultilabelPandasDataset(train, join(data_dir, 'train'))
     train = chainer.datasets.TransformDataset(
         train, ImgaugTransformer(size, True))
@@ -95,7 +100,7 @@ def get_dataset(data_dir, size, limit, mixup):
         print('mixup')
         train = MixupDataset(train)
 
-    return train, test
+    return train, test, order_sampler
 
 
 def f2_score(pred, true):

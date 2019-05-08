@@ -22,8 +22,8 @@ from tqdm import tqdm
 from adam import Adam
 from lr_finder import LRFinder
 from predict import ImgaugTransformer, ResNet, DebugModel, infer, backbone_catalog, num_attributes
-from dataset import MultilabelPandasDataset, MixupDataset, count_cooccurrence
-from multilabel_classifier import make_folds, get_dataset, f2_score, find_optimal_threshold, set_random_seed, FScoreEvaluator, focal_loss, find_threshold
+from dataset import MultilabelPandasDataset, MixupDataset, count_cooccurrence, BalancedOrderSampler, calc_sampling_probs
+from multilabel_classifier import make_folds, f2_score, get_dataset, find_optimal_threshold, set_random_seed, FScoreEvaluator, focal_loss, find_threshold
 from graph_convolution import GraphConvolutionalNetwork
 from cyclical_lr_scheduler import CosineAnnealing
 
@@ -176,7 +176,7 @@ def main(args=None):
     if args.mixup and args.loss_function != 'focal':
         raise ValueError('mixupを使うときはfocal lossしか使えません（いまんところ）')
 
-    train, test = get_dataset(
+    train, test, balanced_sampler = get_dataset(
         args.data_dir, args.size, args.limit, args.mixup)
     adjacent = make_adjacent_matrix('data/train.csv', args.adj_threshold)
     embeddings = np.load(args.feat)
@@ -211,7 +211,7 @@ def main(args=None):
         model.freeze_extractor()
 
     train_iter = chainer.iterators.MultiprocessIterator(
-        train, args.batchsize, n_processes=8, n_prefetch=2)
+        train, args.batchsize, n_processes=8, n_prefetch=2, order_sampler=balanced_sampler)
     test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
                                                       repeat=False, shuffle=False)
 

@@ -23,7 +23,7 @@ def count_cooccurrence(df, num_attributes=1103, count_self=True):
     return co
 
 
-def calc_sampling_probs(df, min_score=0.01, max_score=0.8):
+def calc_sampling_probs(df, min_score=0, max_score=1):
     co = count_cooccurrence(df)
     freq = np.diag(co)
     score = np.clip(1 / freq, min_score, max_score)
@@ -38,13 +38,13 @@ def calc_sampling_probs(df, min_score=0.01, max_score=0.8):
 
 
 class BalancedOrderSampler(chainer.iterators.OrderSampler):
-    def __init__(self, probs):
+    def __init__(self, df):
         super().__init__()
-        self.probs = probs
-        self.indexes = np.arange(len(probs))
+        self.probs = calc_sampling_probs(df)
 
     def __call__(self, current_order, current_position):
-        return np.random.choice(self.indexes, replace=False, p=self.probs)
+        n = len(self.probs)
+        return np.random.choice(n, n, replace=False, p=self.probs)
 
 
 class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
@@ -67,6 +67,7 @@ class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
         image = image.convert('RGB')
         image = np.asarray(image).astype(np.uint8)
         return image, one_hot_attributes
+        # return np.zeros((32, 32, 3), dtype=np.float32), one_hot_attributes
 
 
 class MixupDataset(chainer.dataset.DatasetMixin):
