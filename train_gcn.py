@@ -3,7 +3,6 @@ from pathlib import Path
 from glob import glob
 import pickle
 import argparse
-from itertools import combinations
 
 import chainer
 import chainer.links as L
@@ -23,27 +22,10 @@ from tqdm import tqdm
 from adam import Adam
 from lr_finder import LRFinder
 from predict import ImgaugTransformer, ResNet, DebugModel, infer, backbone_catalog, num_attributes
-from dataset import MultilabelPandasDataset, MixupDataset
+from dataset import MultilabelPandasDataset, MixupDataset, count_cooccurrence
 from multilabel_classifier import make_folds, get_dataset, f2_score, find_optimal_threshold, set_random_seed, FScoreEvaluator, focal_loss, find_threshold
 from graph_convolution import GraphConvolutionalNetwork
 from cyclical_lr_scheduler import CosineAnnealing
-
-
-def count_cooccurrence(df, num_attributes=1103, count_self=True):
-    co = np.zeros((num_attributes, num_attributes), dtype=np.int32)
-    for row in df.itertuples(index=False):
-        id, attr = row
-
-        attrs = list(map(int, attr.split(' ')))
-        for i, j in combinations(attrs, 2):
-            co[i, j] += 1
-            co[j, i] += 1
-
-        if count_self:
-            for i in attrs:
-                co[i, i] += 1
-
-    return co
 
 
 def make_adjacent_matrix(train_file, t):

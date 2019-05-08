@@ -54,6 +54,32 @@ def get_dataset(data_dir, size, limit, mixup):
     test = df[df.fold == 0]
     train = train.drop(columns=['fold'])
     test = test.drop(columns=['fold'])
+
+    def flat_labels(df):
+        arr = []
+        for row in df.itertuples(index=False):
+            id, attr = row
+            arr.append(np.array([i for i in map(int, attr.split(' '))]))
+
+        return np.concatenate(arr)
+
+    not_included = np.where(np.bincount(flat_labels(
+        train), minlength=num_attributes) == 0)[0]
+    print('以下のラベルはtrainに含まれていません. ', not_included)
+
+    for l in not_included:
+        for row in test.itertuples(index=True):
+            index, id, attr = row
+            attrs = list(map(int, attr.split(' ')))
+            if l in attrs:
+                train = train.append(test.loc[index])
+                test = test.drop(index)
+                print(id, attr, 'が追加されました')
+                break
+
+    assert len(np.where(np.bincount(flat_labels(train),
+                                    minlength=num_attributes) == 0)[0]) == 0
+
     if limit is not None:
         train = train[:limit]
         test = test[:limit]

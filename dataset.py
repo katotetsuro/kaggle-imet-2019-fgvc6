@@ -1,8 +1,50 @@
 from os.path import join
+from itertools import combinations
 import numpy as np
 import chainer
 from predict import num_attributes, backbone_catalog
 from PIL import Image
+
+
+def count_cooccurrence(df, num_attributes=1103, count_self=True):
+    co = np.zeros((num_attributes, num_attributes), dtype=np.int32)
+    for row in df.itertuples(index=False):
+        id, attr = row
+
+        attrs = list(map(int, attr.split(' ')))
+        for i, j in combinations(attrs, 2):
+            co[i, j] += 1
+            co[j, i] += 1
+
+        if count_self:
+            for i in attrs:
+                co[i, i] += 1
+
+    return co
+
+
+def calc_sampling_probs(df, min_score=0.01, max_score=0.8):
+    co = count_cooccurrence(df)
+    freq = np.diag(co)
+    score = np.clip(1 / freq, min_score, max_score)
+    scores = []
+    for row in df.itertuples(index=False):
+        id, attr = row
+        s = np.sum([score[i] for i in map(int, attr.split(' '))])
+        scores.append(s)
+
+    probs = scores / np.sum(scores)
+    return probs
+
+
+class BalancedOrderSampler(chainer.iterators.OrderSampler):
+    def __init__(self, probs):
+        super().__init__()
+        self.probs = probs
+        self.indexes = np.arange(len(probs))
+
+    def __call__(self, current_order, current_position):
+        return np.random.choice(self.indexes, replace=False, p=self.probs)
 
 
 class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
