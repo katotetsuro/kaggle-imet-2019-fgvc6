@@ -69,7 +69,7 @@ class GCNCNN(chainer.Chain):
 
         y_1 = F.dropout(y_1)
         s = y_1.shape[2]
-        y_1 = F.max_pooling_2d(y_1, s)[:, :, 0, 0]
+        y_1 = F.average_pooling_2d(y_1, s)[:, :, 0, 0]
         y_2 = self.gcn(self.embeddings)
         y_2 = F.dropout(y_2)
 
