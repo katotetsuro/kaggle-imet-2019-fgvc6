@@ -1,9 +1,16 @@
 from os.path import join
 from itertools import combinations
+from collections import defaultdict, Counter
+import random
+
 import numpy as np
+import pandas as pd
 import chainer
 from predict import num_attributes, backbone_catalog
 from PIL import Image
+from tqdm import tqdm
+
+from predict import ImgaugTransformer
 
 
 def count_cooccurrence(df, num_attributes=1103, count_self=True):
@@ -92,3 +99,81 @@ class MixupDataset(chainer.dataset.DatasetMixin):
             print('shuffle mixup dataset')
             np.random.shuffle(self.indexes)
         return img, label
+
+
+def make_folds(n_folds: int, df: pd.DataFrame) -> pd.DataFrame:
+    """copyright https://github.com/lopuhin/kaggle-imet-2019/blob/master/imet/make_folds.py
+    """
+    cls_counts = Counter(cls for classes in df['attribute_ids'].str.split()
+                         for cls in classes)
+    fold_cls_counts = defaultdict(int)
+    folds = [-1] * len(df)
+    for item in tqdm(df.sample(frac=1, random_state=42).itertuples(),
+                     total=len(df)):
+        cls = min(item.attribute_ids.split(), key=lambda cls: cls_counts[cls])
+        fold_counts = [(f, fold_cls_counts[f, cls]) for f in range(n_folds)]
+        min_count = min([count for _, count in fold_counts])
+        random.seed(item.Index)
+        fold = random.choice([f for f, count in fold_counts
+                              if count == min_count])
+        folds[item.Index] = fold
+        for cls in item.attribute_ids.split():
+            fold_cls_counts[fold, cls] += 1
+    df['fold'] = folds
+    return df
+
+
+def get_dataset(df_file, data_dir, size, limit, mixup):
+    df = pd.read_csv(join(data_dir, df_file))
+    df = make_folds(5, df)
+    train = df[df.fold != 0]
+    test = df[df.fold == 0]
+    train = train.drop(columns=['fold'])
+    test = test.drop(columns=['fold'])
+
+    def flat_labels(df):
+        arr = []
+        for row in df.itertuples(index=False):
+            id, attr = row
+            arr.append(np.array([i for i in map(int, attr.split(' '))]))
+
+        return np.concatenate(arr)
+
+    not_included = np.where(np.bincount(flat_labels(
+        train), minlength=num_attributes) == 0)[0]
+    print('以下のラベルはtrainに含まれていません. ', not_included)
+
+    for l in not_included:
+        for row in test.itertuples(index=True):
+            index, id, attr = row
+            attrs = list(map(int, attr.split(' ')))
+            if l in attrs:
+                train = train.append(test.loc[index])
+                test = test.drop(index)
+                print(id, attr, 'が追加されました')
+                break
+
+    assert len(np.where(np.bincount(flat_labels(train),
+                                    minlength=num_attributes) == 0)[0]) == 0
+
+    if limit is not None:
+        train = train[:limit]
+        test = test[:limit]
+        print('limitが指定されているときはShuffleOrderSamplerしか使えない')
+        order_sampler = chainer.iterators.ShuffleOrderSampler()
+    else:
+        print('balanced order samplerをつかいます')
+        order_sampler = BalancedOrderSampler(train)
+    train = MultilabelPandasDataset(train, join(data_dir, 'train'))
+    train = chainer.datasets.TransformDataset(
+        train, ImgaugTransformer(size, True))
+
+    test = MultilabelPandasDataset(test, join(data_dir, 'train'))
+    test = chainer.datasets.TransformDataset(
+        test, ImgaugTransformer(size, False))
+
+    if mixup:
+        print('mixup')
+        train = MixupDataset(train)
+
+    return train, test, order_sampler
