@@ -177,3 +177,12 @@ def get_dataset(df_file, data_dir, size, limit, mixup):
         train = MixupDataset(train)
 
     return train, test, order_sampler
+
+
+class SubsetSampler(chainer.iterators.OrderSampler):
+    def __init__(self, total_size, sample_size):
+        self.total_size = total_size
+        self.sample_size = sample_size
+
+    def __call__(self, a, b):
+        return np.random.choice(self.total_size, self.sample_size, replace=False)

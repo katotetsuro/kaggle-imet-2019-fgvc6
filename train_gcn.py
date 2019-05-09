@@ -22,7 +22,7 @@ from tqdm import tqdm
 from adam import Adam
 from lr_finder import LRFinder
 from predict import ImgaugTransformer, ResNet, DebugModel, infer, backbone_catalog, num_attributes
-from dataset import get_dataset, count_cooccurrence
+from dataset import get_dataset, count_cooccurrence, SubsetSampler
 from multilabel_classifier import f2_score, find_optimal_threshold, set_random_seed, FScoreEvaluator, focal_loss, find_threshold
 from graph_convolution import GraphConvolutionalNetwork
 from cyclical_lr_scheduler import CosineAnnealing
@@ -213,7 +213,7 @@ def main(args=None):
     train_iter = chainer.iterators.MultiprocessIterator(
         train, args.batchsize, n_processes=8, n_prefetch=2, order_sampler=balanced_sampler)
     test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
-                                                      repeat=False, shuffle=False)
+                                                      repeat=False, order_sampler=SubsetSampler(len(test), min(1000, len(test))))
 
     if args.find_threshold:
         # train_iter, optimizerなど無駄なsetupもあるが。。
@@ -301,6 +301,8 @@ def main(args=None):
     trainer.run()
 
     # find optimal threshold
+    test_iter = chainer.iterators.MultithreadIterator(
+        test, args.batchsize, n_threads=8, repeat=False, shuffle=False)
     chainer.serializers.load_npz(join(args.out, 'bestmodel_loss'), base_model)
     print('lossがもっとも小さかったモデルに対しての結果:')
     find_threshold(base_model, test_iter, args.gpu, args.out)
