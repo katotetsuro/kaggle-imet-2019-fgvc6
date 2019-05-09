@@ -14,6 +14,8 @@ from predict import ImgaugTransformer
 
 
 def count_cooccurrence(df, num_attributes=1103, count_self=True):
+    if isinstance(df, str):
+        df = pd.read_csv(df)
     co = np.zeros((num_attributes, num_attributes), dtype=np.int32)
     for row in df.itertuples(index=False):
         id, attr = row
@@ -31,9 +33,11 @@ def count_cooccurrence(df, num_attributes=1103, count_self=True):
 
 
 def calc_sampling_probs(df, min_score=0, max_score=1):
+    if isinstance(df, str):
+        df = pd.read_csv(df)
     co = count_cooccurrence(df)
     freq = np.diag(co)
-    score = np.clip(1 / freq, min_score, max_score)
+    score = np.clip(1 / freq, min_score, max_score) ** 4
     scores = []
     for row in df.itertuples(index=False):
         id, attr = row
@@ -55,10 +59,13 @@ class BalancedOrderSampler(chainer.iterators.OrderSampler):
 
 
 class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
-    def __init__(self, df, data_dir):
+    def __init__(self, df, data_dir, dummy=False):
         super().__init__()
         self.df = df
         self.data_dir = data_dir
+        self.dummy = dummy
+        if dummy:
+            print('画像をロードしないデータセットです')
 
     def __len__(self):
         return len(self.df)
@@ -70,11 +77,14 @@ class MultilabelPandasDataset(chainer.dataset.DatasetMixin):
         one_hot_attributes = np.zeros(num_attributes, dtype=np.int32)
         for a in attributes:
             one_hot_attributes[a] = 1
+
+        if self.dummy:
+            return np.zeros((32, 32, 3), dtype=np.float32), one_hot_attributes
+
         image = Image.open(join(self.data_dir, image_id + '.png'))
         image = image.convert('RGB')
         image = np.asarray(image).astype(np.uint8)
         return image, one_hot_attributes
-        # return np.zeros((32, 32, 3), dtype=np.float32), one_hot_attributes
 
 
 class MixupDataset(chainer.dataset.DatasetMixin):
