@@ -23,66 +23,7 @@ from tqdm import tqdm
 from adam import Adam
 from lr_finder import LRFinder
 from predict import ImgaugTransformer, ResNet, DebugModel, infer, num_attributes, backbone_catalog
-from dataset import MultilabelPandasDataset, MixupDataset
-
-
-def make_folds(n_folds: int, df: pd.DataFrame) -> pd.DataFrame:
-    """copyright https://github.com/lopuhin/kaggle-imet-2019/blob/master/imet/make_folds.py
-    """
-    cls_counts = Counter(cls for classes in df['attribute_ids'].str.split()
-                         for cls in classes)
-    fold_cls_counts = defaultdict(int)
-    folds = [-1] * len(df)
-    for item in tqdm(df.sample(frac=1, random_state=42).itertuples(),
-                     total=len(df)):
-        cls = min(item.attribute_ids.split(), key=lambda cls: cls_counts[cls])
-        fold_counts = [(f, fold_cls_counts[f, cls]) for f in range(n_folds)]
-        min_count = min([count for _, count in fold_counts])
-        random.seed(item.Index)
-        fold = random.choice([f for f, count in fold_counts
-                              if count == min_count])
-        folds[item.Index] = fold
-        for cls in item.attribute_ids.split():
-            fold_cls_counts[fold, cls] += 1
-    df['fold'] = folds
-    return df
-
-
-def count_cooccurrence(df, n=num_attributes):
-    co = np.zeros((n, n), dtype=np.int32)
-    for row in df.itertuples(index=False):
-        id, attr = row
-        for i, j in combinations(map(int, attr.split(' ')), 2):
-            co[i, j] += 1
-            co[j, i] += 1
-
-    return co
-
-
-def get_dataset(data_dir, size, limit, mixup):
-    df = pd.read_csv(join(data_dir, 'train.csv'))
-    co = count_cooccurrence(df)
-    df = make_folds(5, df)
-    train = df[df.fold != 0]
-    test = df[df.fold == 0]
-    train = train.drop(columns=['fold'])
-    test = test.drop(columns=['fold'])
-    if limit is not None:
-        train = train[:limit]
-        test = test[:limit]
-    train = MultilabelPandasDataset(train, join(data_dir, 'train'))
-    train = chainer.datasets.TransformDataset(
-        train, ImgaugTransformer(size, True))
-
-    test = MultilabelPandasDataset(test, join(data_dir, 'train'))
-    test = chainer.datasets.TransformDataset(
-        test, ImgaugTransformer(size, False))
-
-    if mixup:
-        print('mixup')
-        train = MixupDataset(train)
-
-    return train, test, co
+from dataset import get_dataset, SubsetSampler
 
 
 def f2_score(pred, true):
@@ -146,7 +87,7 @@ def cooccurrence_loss(y_pred, y_true, mask):
 
 
 class TrainChain(chainer.Chain):
-    def __init__(self, model, weight, loss_fn, cooccurrence, co_coef):
+    def __init__(self, model, weight, loss_fn):
         super().__init__()
         with self.init_scope():
             self.model = model
@@ -160,39 +101,16 @@ class TrainChain(chainer.Chain):
         else:
             raise ValueError('unknown loss function. {}'.format(loss_fn))
 
-        self.cooccurrence = cooccurrence.astype(np.int32)
-        # 対角成分と共起している組み合わせにはlossをかけない
-        self.co_ignore_mask = self.cooccurrence
-        self.co_ignore_mask[np.arange(
-            num_attributes), np.arange(num_attributes)] = 1
-        self.co_ignore_mask[cooccurrence > 0] = 1
-        self.co_ignore_mask = 1 - self.co_ignore_mask
-        self.co_coef = co_coef
-
     def loss(self, y, t):
         attribute_wise_loss = self.loss_fn(y, t)
-
-        # loss based on bad cooccurrence
-        xp = chainer.backend.cuda.get_array_module(y)
-        if self.co_coef == 0:
-            co_loss = F.sum(xp.zeros(1, dtype=np.float32))
-        else:
-            if xp == chainer.backends.cuda.cupy:
-                self.cooccurrence = chainer.backends.cuda.to_gpu(
-                    self.cooccurrence)
-                self.co_ignore_mask = chainer.backends.cuda.to_gpu(
-                    self.co_ignore_mask)
-            co_loss = cooccurrence_loss(
-                y, self.cooccurrence, self.co_ignore_mask)
-        return attribute_wise_loss, co_loss
+        return attribute_wise_loss
 
     def forward(self, x, t):
         y = self.model(x)
-        loss, co_loss = self.loss(y, t)
+        loss = self.loss(y, t)
         chainer.reporter.report(
-            {'loss': loss/len(t),
-             'co_loss': co_loss/len(t)}, self)
-        return loss + self.co_coef * co_loss
+            {'loss': loss/len(t)}, self)
+        return loss
 
     def freeze_extractor(self):
         self.model.freeze()
@@ -229,12 +147,11 @@ class FScoreEvaluator(extensions.Evaluator):
         target = self._targets['main']
         with chainer.reporter.report_scope(observation):
             with chainer.function.no_backprop_mode():
-                pred, true, loss, co_loss = infer(
+                pred, true, loss = infer(
                     it, target.model, self.device, target.loss)
                 threshold, (precision, recall,
                             f2) = find_optimal_threshold(pred, true)
                 chainer.reporter.report({'loss': loss/it.batch_size,
-                                         'co_loss': co_loss/it.batch_size,
                                          'precision': precision,
                                          'recall': recall,
                                          'f2': f2}, target)
@@ -297,15 +214,15 @@ def main(args=None):
     if args.mixup and args.loss_function != 'focal':
         raise ValueError('mixupを使うときはfocal lossしか使えません（いまんところ）')
 
-    train, test, cooccurrence = get_dataset(
-        args.data_dir, args.size, args.limit, args.mixup)
+    train, test, order_sampler = get_dataset('train.csv',
+                                             args.data_dir, args.size, args.limit, args.mixup)
     base_model = backbone_catalog[args.backbone](args.dropout)
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
         chainer.serializers.load_npz(args.pretrained, base_model, strict=False)
     model = TrainChain(base_model, 1,
-                       loss_fn=args.loss_function, cooccurrence=cooccurrence, co_coef=0)
+                       loss_fn=args.loss_function)
     if args.gpu >= 0:
         chainer.backends.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
@@ -323,9 +240,9 @@ def main(args=None):
         model.freeze_extractor()
 
     train_iter = chainer.iterators.MultiprocessIterator(
-        train, args.batchsize, n_processes=8, n_prefetch=2)
+        train, args.batchsize, n_processes=8, n_prefetch=2, order_sampler=order_sampler)
     test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
-                                                      repeat=False, shuffle=False)
+                                                      repeat=False, order_sampler=SubsetSampler(len(test), min(len(test), 1000)))
 
     if args.find_threshold:
         # train_iter, optimizerなど無駄なsetupもあるが。。
@@ -388,7 +305,7 @@ def main(args=None):
         trigger=(args.log_interval, 'iteration')))
 
     trainer.extend(extensions.PrintReport(
-        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'main/co_loss', 'validation/main/loss', 'validation/main/co_loss', 'validation/main/precision',
+        ['epoch', 'lr', 'elapsed_time', 'main/loss', 'validation/main/loss', 'validation/main/precision',
          'validation/main/recall', 'validation/main/f2', 'validation/main/threshold']))
 
     trainer.extend(extensions.ProgressBar(update_interval=args.log_interval))
