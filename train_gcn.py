@@ -194,8 +194,8 @@ def main(args=None):
         chainer.serializers.load_npz(args.pretrained, base_model, strict=False)
 
     freq = np.diag(count_cooccurrence(join(args.data_dir, 'train.csv')))
-    attributewise_weight = (1 / freq)[None]
-    attributewise_weight = np.clip(attributewise_weight, 0, 1.0)
+    attributewise_weight = (1 / (np.log(freq)+1))[None]
+    attributewise_weight = np.clip(attributewise_weight, 0.2, 1.0)
 
     model = TrainChain(base_model, loss_fn=args.loss_function,
                        weight=attributewise_weight)
