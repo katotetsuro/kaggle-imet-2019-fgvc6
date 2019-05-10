@@ -14,6 +14,8 @@ from predict import ImgaugTransformer
 
 
 def count_cooccurrence(df, num_attributes=1103, count_self=True):
+    if isinstance(df, str):
+        df = pd.read_csv(df)
     co = np.zeros((num_attributes, num_attributes), dtype=np.int32)
     for row in df.itertuples(index=False):
         id, attr = row

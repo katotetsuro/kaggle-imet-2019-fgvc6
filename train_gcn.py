@@ -102,20 +102,27 @@ def multilabel_soft_margin_loss(y, t):
 
 
 class TrainChain(chainer.Chain):
-    def __init__(self, model, loss_fn):
+    def __init__(self, model, loss_fn, weight):
         super().__init__()
         with self.init_scope():
             self.model = model
 
+        self.weight = weight
+
         if loss_fn == 'focal':
-            self.loss_fn = lambda x, t: F.sum(focal_loss(F.sigmoid(x), t))
+            self.loss_fn = lambda x, t: F.sum(
+                weight * focal_loss(self.weight * F.sigmoid(x), t))
         elif loss_fn == 'sigmoid':
-            self.loss_fn = lambda x, t: F.sum(F.sigmoid_cross_entropy(
+            self.loss_fn = lambda x, t: F.sum(self.weight * F.sigmoid_cross_entropy(
                 x, t, reduce='no'))
         elif loss_fn == 'margin':
             self.loss_fn = multilabel_soft_margin_loss
         else:
             raise ValueError('unknown loss function. {}'.format(loss_fn))
+
+    def to_gpu(self, device=None):
+        self.weight = chainer.backends.cuda.to_gpu(self.weight, device)
+        return super().to_gpu(device)
 
     def loss(self, y, t):
         attribute_wise_loss = self.loss_fn(y, t)
@@ -185,7 +192,13 @@ def main(args=None):
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
         chainer.serializers.load_npz(args.pretrained, base_model, strict=False)
-    model = TrainChain(base_model, loss_fn=args.loss_function)
+
+    freq = np.diag(count_cooccurrence(join(args.data_dir, 'train.csv')))
+    attributewise_weight = (1 / freq)[None]
+    attributewise_weight = np.clip(attributewise_weight, 0, 1.0)
+
+    model = TrainChain(base_model, loss_fn=args.loss_function,
+                       weight=attributewise_weight)
     if args.gpu >= 0:
         chainer.backends.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
@@ -211,7 +224,7 @@ def main(args=None):
         model.freeze_extractor()
 
     train_iter = chainer.iterators.MultiprocessIterator(
-        train, args.batchsize, n_processes=8, n_prefetch=2, order_sampler=balanced_sampler)
+        train, args.batchsize, n_processes=8, n_prefetch=2, order_sampler=chainer.iterators.ShuffleOrderSampler())
     test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
                                                       repeat=False, order_sampler=SubsetSampler(len(test), min(1000, len(test))))
 

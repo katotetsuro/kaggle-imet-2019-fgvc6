@@ -56,8 +56,7 @@ def focal_loss(y_pred, y_true):
     pt = F.clip(pt, epsilon, 1-epsilon)
     CE = -F.log(pt)
     FL = (1-pt)**gamma * CE
-    loss = F.sum(FL, axis=1)
-    return loss
+    return FL
 
 
 def softlabel_focal_loss(y_pred, y_true):
