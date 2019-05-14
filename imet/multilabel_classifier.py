@@ -20,10 +20,10 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from adam import Adam
-from lr_finder import LRFinder
-from predict import ImgaugTransformer, ResNet, DebugModel, infer, num_attributes, backbone_catalog
-from dataset import get_dataset, SubsetSampler, count_cooccurrence
+from .adam import Adam
+from .lr_finder import LRFinder
+from .predict import ImgaugTransformer, ResNet, DebugModel, infer, num_attributes, backbone_catalog
+from .dataset import get_dataset, SubsetSampler, count_cooccurrence
 
 
 def f2_score(pred, true):
@@ -211,6 +211,7 @@ def main(args=None):
     parser.add_argument('--find-threshold', action='store_true')
     parser.add_argument('--finetune', action='store_true')
     parser.add_argument('--mixup', action='store_true')
+    parser.add_argument('--val-fold', default=0, type=int)
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
@@ -219,7 +220,7 @@ def main(args=None):
         raise ValueError('mixupを使うときはfocal lossしか使えません（いまんところ）')
 
     train, test, order_sampler = get_dataset('train.csv',
-                                             args.data_dir, args.size, args.limit, args.mixup)
+                                             args.data_dir, args.size, args.limit, args.mixup, args.val_fold)
     base_model = backbone_catalog[args.backbone](args.dropout)
 
     if args.pretrained:
@@ -229,6 +230,8 @@ def main(args=None):
     freq = np.diag(count_cooccurrence(join(args.data_dir, 'train.csv')))
     attributewise_weight = (1 / freq)[None]
     attributewise_weight = np.clip(attributewise_weight, 0, 1.0)
+    print('baselineのためにweightをすべて1にします')
+    attributewise_weight.fill(1)
     model = TrainChain(base_model, attributewise_weight,
                        loss_fn=args.loss_function)
     if args.gpu >= 0:
@@ -250,7 +253,7 @@ def main(args=None):
     train_iter = chainer.iterators.MultiprocessIterator(
         train, args.batchsize, n_processes=8, n_prefetch=2, shuffle=True)
     test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
-                                                      repeat=False, order_sampler=SubsetSampler(len(test), min(len(test), 1000)))
+                                                      repeat=False, shuffle=False)
 
     if args.find_threshold:
         # train_iter, optimizerなど無駄なsetupもあるが。。
@@ -275,7 +278,7 @@ def main(args=None):
 
     # Evaluate the model with the test dataset for each epoch
     trainer.extend(FScoreEvaluator(
-        test_iter, model, device=args.gpu))
+        test_iter, model, device=args.gpu), trigger=(5, 'epoch'))
 
     if args.optimizer == 'sgd':
         # Adamにweight decayはあんまりよくないらしい

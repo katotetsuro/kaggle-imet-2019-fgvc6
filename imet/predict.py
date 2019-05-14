@@ -310,12 +310,10 @@ def main(_args=None):
         args.data_dir = '../input/imet-2019-fgvc6'
 
     base_model = backbone_catalog[args.backbone](args.dropout)
-    chainer.serializers.load_npz(
-        join(pretrained_model_dir, 'bestmodel'), base_model)
-    if args.gpu >= 0:
-        # kaggleはGPU一個だけ
-        chainer.backends.cuda.get_device_from_id(0).use()
-        base_model.to_gpu()
+
+    weights = list(Path(launch_args.dir).glob('*model*'))
+    print('{} model(s) found.'.format(len(weights)))
+    print(weights)
 
     best_threshold = launch_args.threshold
     image_files = glob(join(args.data_dir, 'test/*.png'))
@@ -328,10 +326,18 @@ def main(_args=None):
         test, args.batchsize, repeat=False, shuffle=False, n_processes=8, n_prefetch=2)
 
     preds = []
-    for _ in tqdm(range(launch_args.tta), total=launch_args.tta):
-        print('tta')
-        pred = infer(test_iter, base_model, args.gpu)
-        preds.append(pred)
+    for w in weights:
+        print('loading weights from {}'.format(w))
+        chainer.serializers.load_npz(join(pretrained_model_dir, w), base_model)
+        if args.gpu >= 0:
+            # kaggleはGPU一個だけ
+            chainer.backends.cuda.get_device_from_id(0).use()
+            base_model.to_gpu()
+
+        for _ in tqdm(range(launch_args.tta), total=launch_args.tta):
+            print('tta')
+            pred = infer(test_iter, base_model, args.gpu)
+            preds.append(pred)
 
     pred = np.mean(preds, axis=0)
     pred = make_prediction(pred, 0.24, 0.28, 4, 9)
@@ -350,5 +356,5 @@ def main(_args=None):
 
 
 if __name__ == '__main__':
-    main()
-#    main(['../input/xxxxx', '4', '0.28'])
+    #    main()
+    main(['../input/fold_001', '4', '0.28'])

@@ -6,11 +6,9 @@ import random
 import numpy as np
 import pandas as pd
 import chainer
-from predict import num_attributes, backbone_catalog
+from .predict import num_attributes, backbone_catalog, ImgaugTransformer
 from PIL import Image
 from tqdm import tqdm
-
-from predict import ImgaugTransformer
 
 
 def count_cooccurrence(df, num_attributes=1103, count_self=True):
@@ -133,11 +131,12 @@ def make_folds(n_folds: int, df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def get_dataset(df_file, data_dir, size, limit, mixup):
+def get_dataset(df_file, data_dir, size, limit, mixup, val_fold):
+    print('using fold: {}/5'.format(val_fold+1))
     df = pd.read_csv(join(data_dir, df_file))
-    df = make_folds(10, df)
-    train = df[df.fold != 0]
-    test = df[df.fold == 0]
+    df = make_folds(5, df)
+    train = df[df.fold != val_fold]
+    test = df[df.fold == val_fold]
     train = train.drop(columns=['fold'])
     test = test.drop(columns=['fold'])
 
