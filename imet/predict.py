@@ -335,7 +335,6 @@ def main(_args=None):
             base_model.to_gpu()
 
         for _ in tqdm(range(launch_args.tta), total=launch_args.tta):
-            print('tta')
             pred = infer(test_iter, base_model, args.gpu)
             preds.append(pred)
 
