@@ -89,19 +89,19 @@ class ResNet(chainer.Chain):
         with self.init_scope():
             self.res = ResNet50(
                 pretrained_model=None if ON_KAGGLE else 'imagenet')
-            self.res.pick = 'pool5'
-            self.fc1 = chainer.links.Linear(None, 512)
-            self.fc2 = chainer.links.Linear(None, num_attributes)
+            self.res.pick = 'res5'
+            self.fc = chainer.links.Linear(None, num_attributes)
 
         self.dropout = dropout
 
     @chainer.static_graph
     def forward(self, x):
         h = self.res(x)
-        h = self.fc1(h)
+        s = h.shape[2]
+        h = F.max_pooling_2d(h, s)[:, :, 0, 0]
         if self.dropout:
             h = F.dropout(h)
-        h = self.fc2(h)
+        h = self.fc(h)
         return h
 
     def freeze(self):

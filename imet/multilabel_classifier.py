@@ -249,14 +249,15 @@ def main(args=None):
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
     optimizer.setup(model)
+    optimizer.add_hook(chainer.optimizer_hooks.GradientClipping(10))
 
     if not args.finetune:
         print('最初のエポックは特徴抽出層をfreezeします')
         model.freeze_extractor()
 
     train_iter = chainer.iterators.MultiprocessIterator(
-        train, args.batchsize, n_processes=8, n_prefetch=2, shuffle=True)
-    test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=8,
+        train, args.batchsize, n_processes=2, n_prefetch=2, shuffle=True)
+    test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=2,
                                                       repeat=False, shuffle=False)
 
     if args.find_threshold:

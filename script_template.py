@@ -22,4 +22,4 @@ def run(command):
 
 run('python setup.py develop --install-dir /kaggle/working')
 run('pip install chainerui --ignore-installed')
-run('python -m imet.multilabel_classifier --data-dir ../input --size 256 --epoch 25 --loss-function focal --backbone seresnext --dropout --learnrate 2e-4 --optimizer adabound --val-fold ')
+run('python -m imet.multilabel_classifier --data-dir ../input --size 224 --epoch 25 --loss-function focal --dropout --finetune --learnrate 1e-4 --optimizer adabound --val-fold 0')
