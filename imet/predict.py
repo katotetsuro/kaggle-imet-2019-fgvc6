@@ -54,7 +54,7 @@ class ImgaugTransformer(chainer.datasets.TransformDataset):
         self.seq = iaa.Sequential([iaa.OneOf([
             iaa.CropToFixedSize(size, size),
             iaa.Resize((size, size))
-        ], random_state=63),  # end of OneOf
+        ]),  # end of OneOf
             iaa.Fliplr(0.5),
             iaa.PerspectiveTransform(0.01)])
 

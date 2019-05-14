@@ -86,27 +86,32 @@ def cooccurrence_loss(y_pred, y_true, mask):
 
 
 class TrainChain(chainer.Chain):
-    def __init__(self, model, weight, loss_fn):
+    def __init__(self, model, weight, loss_fn, sigma=1):
         super().__init__()
         with self.init_scope():
             self.model = model
 
         self.weight = weight
         if loss_fn == 'focal':
-            self.loss_fn = lambda x, t: F.sum(
-                self.weight * focal_loss(F.sigmoid(x), t))
+            self.loss_fn = lambda x, t, w: F.sum(
+                w * focal_loss(F.sigmoid(x), t))
         elif loss_fn == 'sigmoid':
-            self.loss_fn = lambda x, t: F.sum(self.weight * F.sigmoid_cross_entropy(
+            self.loss_fn = lambda x, t, w: F.sum(w * F.sigmoid_cross_entropy(
                 x, t, reduce='no'))
         else:
             raise ValueError('unknown loss function. {}'.format(loss_fn))
+
+        self.sigma = sigma
 
     def to_gpu(self, device=None):
         self.weight = chainer.backends.cuda.to_gpu(self.weight, device)
         return super().to_gpu(device)
 
     def loss(self, y, t):
-        attribute_wise_loss = self.loss_fn(y, t)
+        xp = chainer.backends.cuda.get_array_module(y)
+        s = self.sigma ** 2
+        w = xp.where(t == 1, xp.exp((1-self.weight)/s), xp.exp(self.weight/s))
+        attribute_wise_loss = self.loss_fn(y, t, w)
         return attribute_wise_loss
 
     def forward(self, x, t):
@@ -212,6 +217,7 @@ def main(args=None):
     parser.add_argument('--finetune', action='store_true')
     parser.add_argument('--mixup', action='store_true')
     parser.add_argument('--val-fold', default=0, type=int)
+    parser.add_argument('--eval-interval', default=1, type=int)
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
@@ -227,11 +233,9 @@ def main(args=None):
         print('loading pretrained model: {}'.format(args.pretrained))
         chainer.serializers.load_npz(args.pretrained, base_model, strict=False)
 
-    freq = np.diag(count_cooccurrence(join(args.data_dir, 'train.csv')))
-    attributewise_weight = (1 / freq)[None]
-    attributewise_weight = np.clip(attributewise_weight, 0, 1.0)
-    print('baselineのためにweightをすべて1にします')
-    attributewise_weight.fill(1)
+    df = pd.read_csv(join(args.data_dir, 'train.csv'))
+    freq = np.diag(count_cooccurrence(df))
+    attributewise_weight = (freq / len(df))[None]
     model = TrainChain(base_model, attributewise_weight,
                        loss_fn=args.loss_function)
     if args.gpu >= 0:
@@ -278,7 +282,7 @@ def main(args=None):
 
     # Evaluate the model with the test dataset for each epoch
     trainer.extend(FScoreEvaluator(
-        test_iter, model, device=args.gpu), trigger=(5, 'epoch'))
+        test_iter, model, device=args.gpu), trigger=(args.eval_interval, 'epoch'))
 
     if args.optimizer == 'sgd':
         # Adamにweight decayはあんまりよくないらしい
@@ -305,9 +309,9 @@ def main(args=None):
     # Take a snapshot of Model which has best val loss.
     # Because searching best threshold for each evaluation takes too much time.
     trainer.extend(extensions.snapshot_object(
-        model.model, 'bestmodel_loss'), trigger=triggers.MinValueTrigger('validation/main/loss'))
+        model.model, 'bestmodel_loss'), trigger=triggers.MinValueTrigger('validation/main/loss', trigger=(args.eval_interval, 'epoch')))
     trainer.extend(extensions.snapshot_object(
-        model.model, 'bestmodel_f2'), trigger=triggers.MaxValueTrigger('validation/main/f2'))
+        model.model, 'bestmodel_f2'), trigger=triggers.MaxValueTrigger('validation/main/f2', trigger=(args.eval_interval, 'epoch')))
     trainer.extend(extensions.snapshot_object(
         model.model, 'model_{.updater.epoch}'), trigger=(5, 'epoch'))
 
