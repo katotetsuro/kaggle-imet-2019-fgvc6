@@ -120,18 +120,16 @@ class SEResNet(chainer.Chain):
             self.res = SEResNet50(
                 pretrained_model=None if ON_KAGGLE else 'imagenet')
             self.res.pick = 'res5'
-            self.fc1 = chainer.links.Linear(None, 1024)
-            self.fc2 = chainer.links.Linear(None, num_attributes)
+            self.fc = chainer.links.Linear(None, num_attributes)
         self.dropout = dropout
 
     def forward(self, x):
         h = self.res(x)
         s = h.shape[2]
-        h = F.max_pooling_2d(h, s)
-        h = self.fc1(h)
+        h = F.max_pooling_2d(h, s)[:, :, 0, 0]
         if self.dropout:
             h = F.dropout(h)
-        h = self.fc2(h)
+        h = self.fc(h)
         return h
 
     def freeze(self):

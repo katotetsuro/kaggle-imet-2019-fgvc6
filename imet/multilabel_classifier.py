@@ -218,6 +218,7 @@ def main(args=None):
     parser.add_argument('--mixup', action='store_true')
     parser.add_argument('--val-fold', default=0, type=int)
     parser.add_argument('--eval-interval', default=1, type=int)
+    parser.add_argument('--sigma', default=1, type=float)
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
@@ -237,7 +238,7 @@ def main(args=None):
     freq = np.diag(count_cooccurrence(df))
     attributewise_weight = (freq / len(df))[None]
     model = TrainChain(base_model, attributewise_weight,
-                       loss_fn=args.loss_function)
+                       loss_fn=args.loss_function, sigma=args.sigma)
     if args.gpu >= 0:
         chainer.backends.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
