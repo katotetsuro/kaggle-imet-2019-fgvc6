@@ -20,6 +20,6 @@ def run(command):
     os.system('export PYTHONPATH=${PYTHONPATH}:/kaggle/working && ' + command)
 
 
-run('python setup.py develop --install-dir /kaggle/working')
 run('pip install chainerui --ignore-installed')
-run('python -m imet.multilabel_classifier --data-dir ../input --size 224 --epoch 25 --loss-function focal --dropout --finetune --learnrate 1e-4 --optimizer adabound --val-fold 0')
+run('python setup.py develop --install-dir /kaggle/working')
+run('python -m imet.multilabel_classifier --val-fold 0 --data-dir ../input/imet-2019-fgvc6 --size 320 --batchsize 32 --epoch 15 --loss-function sigmoid --learnrate 1e-4 --optimizer adabound --sigma 2 --backbone seresnext --gamma 1e-4 --dropout')

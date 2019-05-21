@@ -14,7 +14,7 @@ import numpy as np
 from tqdm import tqdm
 
 try:
-    from chainercv.links.model.senet import SEResNet50, SEResNeXt50
+    from chainercv.links.model.senet import SEResNet50, SEResNeXt101
     from chainercv.links.model.resnet import ResNet50
 except ImportError:
     print('kaggle kernelではchainercvを直接importできないので、dillでロードする')
@@ -31,7 +31,8 @@ num_culture = 398
 
 # copyright https://github.com/lopuhin/kaggle-imet-2019/blob/master/imet/utils.py
 import os
-ON_KAGGLE = 'KAGGLE_WORKING_DIR' in os.environ
+#ON_KAGGLE = 'KAGGLE_WORKING_DIR' in os.environ
+ON_KAGGLE = False
 
 
 class ImageDataset(chainer.dataset.DatasetMixin):
@@ -51,15 +52,15 @@ class ImageDataset(chainer.dataset.DatasetMixin):
 
 class ImgaugTransformer(chainer.datasets.TransformDataset):
     def __init__(self, size, train):
-        self.seq = iaa.Sequential([iaa.OneOf([
-            iaa.CropToFixedSize(size, size),
-            iaa.Resize((size, size))
-        ]),  # end of OneOf
+        self.seq = iaa.Sequential([
+            iaa.Sometimes(0.5, iaa.CropAndPad(percent=(-0.05, 0.1))),
+            iaa.Resize((size, size)),
             iaa.Fliplr(0.5),
             iaa.PerspectiveTransform(0.01)])
 
         if train:
-            self.seq.append(iaa.CoarseSaltAndPepper(0.2, size_percent=0.01))
+            self.seq.append(iaa.CoarseSaltAndPepper(0.1, size_percent=0.02))
+            self.seq.append(iaa.Sometimes(0.5, iaa.ChannelShuffle()))
 
         #self.seq = self.seq.to_deterministic()
 
@@ -148,19 +149,19 @@ class SEResNeXt(chainer.Chain):
     def __init__(self, dropout):
         super().__init__()
         with self.init_scope():
-            self.res = SEResNeXt50(
+            self.res = SEResNeXt101(
                 pretrained_model=None if ON_KAGGLE else 'imagenet')
-            self.res.pick = 'pool5'
-            self.fc1 = chainer.links.Linear(None, 1024)
-            self.fc2 = chainer.links.Linear(None, num_attributes)
+            self.res.pick = 'res5'
+            self.fc = chainer.links.Linear(None, num_attributes)
         self.dropout = dropout
 
     def forward(self, x):
         h = self.res(x)
-        h = self.fc1(h)
+        s = h.shape[2]
+        h = F.average_pooling_2d(h, s)[:, :, 0, 0]
         if self.dropout:
             h = F.dropout(h)
-        h = self.fc2(h)
+        h = self.fc(h)
         return h
 
     def freeze(self):

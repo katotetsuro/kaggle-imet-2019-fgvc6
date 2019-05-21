@@ -219,6 +219,7 @@ def main(args=None):
     parser.add_argument('--val-fold', default=0, type=int)
     parser.add_argument('--eval-interval', default=1, type=int)
     parser.add_argument('--sigma', default=1, type=float)
+    parser.add_argument('--gamma', default=5e-7, type=float)
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
@@ -245,7 +246,7 @@ def main(args=None):
 
     if args.optimizer in ['adam', 'adabound']:
         optimizer = Adam(alpha=args.learnrate, adabound=args.optimizer ==
-                         'adabound', weight_decay_rate=1e-5, gamma=5e-7)
+                         'adabound', weight_decay_rate=1e-5, gamma=args.gamma)
     elif args.optimizer == 'sgd':
         optimizer = chainer.optimizers.MomentumSGD(lr=args.learnrate)
 
@@ -264,14 +265,6 @@ def main(args=None):
     if args.find_threshold:
         # train_iter, optimizerなど無駄なsetupもあるが。。
         print('thresholdを探索して終了します')
-        chainer.serializers.load_npz(
-            join(args.out, 'bestmodel_loss'), base_model)
-        print('lossがもっとも小さかったモデルに対しての結果:')
-        find_threshold(base_model, test_iter, args.gpu, args.out)
-
-        chainer.serializers.load_npz(
-            join(args.out, 'bestmodel_f2'), base_model)
-        print('f2がもっとも大きかったモデルに対しての結果:')
         find_threshold(base_model, test_iter, args.gpu, args.out)
         return
 
@@ -279,8 +272,26 @@ def main(args=None):
     updater = training.updaters.StandardUpdater(
         train_iter, optimizer, device=args.gpu,
         converter=lambda batch, device: chainer.dataset.concat_examples(batch, device=device))
+
+    class TimeupTrigger():
+        def __init__(self, epoch):
+            self.epoch = epoch
+
+        def __call__(self, trainer):
+            epoch = trainer.updater.epoch
+            if epoch > args.epoch:
+                return True
+            time = trainer.elapsed_time
+            if time > 8 * 60 * 60:
+                print('時間切れで終了します。経過時間:{}'.format(time))
+                return True
+            return False
+
+        def get_training_length(self):
+            return self.epoch, 'epoch'
+
     trainer = training.Trainer(
-        updater, (args.epoch, 'epoch'), out=args.out)
+        updater, TimeupTrigger(args.epoch), out=args.out)
 
     # Evaluate the model with the test dataset for each epoch
     trainer.extend(FScoreEvaluator(
@@ -339,6 +350,7 @@ def main(args=None):
         chainer.serializers.load_npz(args.resume, trainer)
 
     # save args with pickle for prediction time
+    Path(args.out).mkdir(parents=True, exist_ok=True)
     pickle.dump(args, open(str(Path(args.out).joinpath('args.pkl')), 'wb'))
 
     # Run the training
