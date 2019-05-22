@@ -24,6 +24,7 @@ from .adam import Adam
 from .lr_finder import LRFinder
 from .predict import ImgaugTransformer, ResNet, DebugModel, infer, num_attributes, backbone_catalog
 from .dataset import get_dataset, SubsetSampler, count_cooccurrence
+from .cyclical_lr_scheduler import CosineAnnealing
 
 
 def f2_score(pred, true):
@@ -257,8 +258,10 @@ def main(args=None):
         print('最初のエポックは特徴抽出層をfreezeします')
         model.freeze_extractor()
 
-    train_iter = chainer.iterators.MultiprocessIterator(
-        train, args.batchsize, n_processes=2, n_prefetch=2, shuffle=True)
+    # train_iter = chainer.iterators.MultiprocessIterator(
+    #     train, args.batchsize, n_processes=2, n_prefetch=2, shuffle=True)
+    train_iter = chainer.iterators.SerialIterator(
+        train, args.batchsize, shuffle=True)
     test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=2,
                                                       repeat=False, shuffle=False)
 
@@ -300,8 +303,8 @@ def main(args=None):
     if args.optimizer == 'sgd':
         # Adamにweight decayはあんまりよくないらしい
         optimizer.add_hook(chainer.optimizer_hooks.WeightDecay(5e-4))
-        trainer.extend(extensions.ExponentialShift(
-            'lr', 0.1), trigger=(3, 'epoch'))
+        trainer.extend(CosineAnnealing(lr_max=args.learnrate, T_0=len(
+            train)/args.batchsize * args.epoch, T_mult=2))
         if args.lr_search:
             print('最適な学習率を探します')
             trainer.extend(LRFinder(1e-7, 1, 5, optimizer),
