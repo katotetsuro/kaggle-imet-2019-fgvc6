@@ -221,6 +221,7 @@ def main(args=None):
     parser.add_argument('--eval-interval', default=1, type=int)
     parser.add_argument('--sigma', default=1, type=float)
     parser.add_argument('--gamma', default=5e-7, type=float)
+    parser.add_argument('--pooling', default='average', type=str)
     args = parser.parse_args() if args is None else parser.parse_args(args)
 
     print(args)
@@ -230,7 +231,7 @@ def main(args=None):
 
     train, test, order_sampler = get_dataset('train.csv',
                                              args.data_dir, args.size, args.limit, args.mixup, args.val_fold)
-    base_model = backbone_catalog[args.backbone](args.dropout)
+    base_model = backbone_catalog[args.backbone](args.dropout, args.pooling)
 
     if args.pretrained:
         print('loading pretrained model: {}'.format(args.pretrained))
@@ -258,10 +259,8 @@ def main(args=None):
         print('最初のエポックは特徴抽出層をfreezeします')
         model.freeze_extractor()
 
-    # train_iter = chainer.iterators.MultiprocessIterator(
-    #     train, args.batchsize, n_processes=2, n_prefetch=2, shuffle=True)
-    train_iter = chainer.iterators.SerialIterator(
-        train, args.batchsize, shuffle=True)
+    train_iter = chainer.iterators.MultiprocessIterator(
+        train, args.batchsize, n_processes=2, n_prefetch=2, shuffle=True)
     test_iter = chainer.iterators.MultithreadIterator(test, args.batchsize, n_threads=2,
                                                       repeat=False, shuffle=False)
 

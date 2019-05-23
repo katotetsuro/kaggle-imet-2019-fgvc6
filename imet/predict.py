@@ -13,18 +13,8 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
-try:
-    from chainercv.links.model.senet import SEResNet50, SEResNeXt101
-    from chainercv.links.model.resnet import ResNet50
-except ImportError:
-    print('kaggle kernelではchainercvを直接importできないので、dillでロードする')
-    import dill
-    SEResNet50 = dill.load(
-        open('../input/model-definitions/seresnet50_def.dill', 'rb'))
-    SEResNeXt50 = dill.load(
-        open('../input/model-definitions/seresnext50_def.dill', 'rb'))
-    ResNet50 = dill.load(
-        open('../input/model-definitions/resnet50_def.dill', 'rb'))
+from chainercv.links.model.senet import SEResNet50, SEResNeXt101
+from chainercv.links.model.resnet import ResNet50
 
 num_attributes = 1103
 num_culture = 398
@@ -146,7 +136,7 @@ class SEResNeXt(chainer.Chain):
     """ResNetクラスとほとんどかわらないんだけど、SEResNextはstatic_graphにできないっぽい？
     """
 
-    def __init__(self, dropout):
+    def __init__(self, dropout, pooling_func):
         super().__init__()
         with self.init_scope():
             self.res = SEResNeXt101(
@@ -155,10 +145,19 @@ class SEResNeXt(chainer.Chain):
             self.fc = chainer.links.Linear(None, num_attributes)
         self.dropout = dropout
 
+        if pooling_func == 'average':
+            print('using average pooling')
+            self.pooling = F.average_pooling_2d
+        elif pooling_func == 'max':
+            print('using max pooling')
+            self.pooling = F.max_pooling_2d
+        else:
+            raise ValueError(pooling_func)
+
     def forward(self, x):
         h = self.res(x)
         s = h.shape[2]
-        h = F.average_pooling_2d(h, s)[:, :, 0, 0]
+        h = self.pooling(h, s)[:, :, 0, 0]
         if self.dropout:
             h = F.dropout(h)
         h = self.fc(h)
@@ -308,7 +307,7 @@ def main(_args=None):
         print('kaggle environment detected. overwriting data_dir...')
         args.data_dir = '../input/imet-2019-fgvc6'
 
-    base_model = backbone_catalog[args.backbone](args.dropout)
+    base_model = backbone_catalog[args.backbone](args.dropout, args.pooling)
 
     weights = list(Path(launch_args.dir).glob('*model*'))
     print('{} model(s) found.'.format(len(weights)))
